@@ -8,6 +8,121 @@ The agent sees a shell-like interface. Gate decides whether each command is auto
 
 Gate does **not** replace Windmill. Windmill remains the remote-access transport and customer connectivity layer.
 
+## Implementation status
+
+Gate v0.1-v0.3 is implemented in this repository as one Go module and one binary:
+
+- `gate`: daemon, operator console, shell client, local/remote protocol bridge, forwarding, history, policy tests, and policy review.
+
+`make build` creates `bin/gate-sh` as a symlink to the same binary; invocation through that name selects the shell-compatible one-command client.
+
+The implementation includes opaque targets, immutable SHA-256-bound approvals, `ALLOW`/`ASK`/`DENY` policy, SQLite audit history, multiple attached clients and targets, cancellation, restricted SSH hosting, loopback forwards, owned host aliases, agent skills, and a policy pull-request workflow that never merges or deploys.
+
+### Build and verify
+
+Go 1.25 or newer is required.
+
+```bash
+make build
+make test
+make test-race
+make policy-test
+```
+
+The binary is written to `bin/gate`, with a `bin/gate-sh` symlink.
+
+### Sancho command contract
+
+Gate keeps Windmill as the transport. Its adapter connects to the configured Bastion with `ssh` and expects these Sancho primitives on that host:
+
+```text
+sancho session list --json
+sancho session exec <session-id> -- <exact-command-payload>
+sancho session forward <session-id> \
+  --listen-host 127.0.0.1 --listen-port <port> \
+  --remote-host 127.0.0.1 --remote-port <port>
+```
+
+`session list --json` must return an array containing `id` plus `name` or `host`. `session exec` must preserve the final command argument as exact bytes and return the remote exit status. `session forward` must remain attached while the target-scoped forward is active. These are external Sancho capabilities; Gate deliberately does not reproduce Windmill connectivity. Backend IDs used in these calls are redacted from agent-visible output and errors.
+
+### Local quick start
+
+Start Gate with the interactive operator console. The target selector prints display names and numbers, never Windmill IDs:
+
+```bash
+bin/gate --bastion operator@bastion.example --agent codex-1
+```
+
+In another terminal, submit exactly one command:
+
+```bash
+bin/gate-sh --agent codex-1 -c 'uname -a'
+```
+
+Unknown commands wait in the operator console. Use `a` to approve once, `s` for a memory-only similar rule scoped to that target until detach, or `d` to deny. `gate daemon` runs without the console and is therefore suitable only when submitted commands are already classified `ALLOW` or `DENY`.
+
+Default local paths are:
+
+```text
+$XDG_RUNTIME_DIR/gate.sock
+$XDG_DATA_HOME/gate/gate.db
+$XDG_CONFIG_HOME/gate/policy.yaml
+```
+
+The policy file is bootstrapped from `policy/default.yaml` when absent. The database and socket are mode `0600`.
+
+### Hosted Gate over restricted SSH
+
+Copy `config/ssh-clients.example.yaml` to `~/.config/gate/ssh-clients.yaml` and map each authorized key fingerprint to its audit identity. Start the Gate daemon/operator console on the host, attach that identity to a Gate target, and restrict its public key:
+
+```text
+command="GATE_SSH_KEY_FINGERPRINT=SHA256:... /usr/local/bin/gate ssh-server",no-port-forwarding,no-agent-forwarding,no-X11-forwarding,no-pty <public-key>
+```
+
+The static fingerprint in the forced command must match the mapping file. Gate rejects `SSH_ORIGINAL_COMMAND`; the agent gets neither a host shell nor SSH forwarding. Connect with:
+
+```bash
+gate-sh --ssh gate@gate-host -c 'uptime'
+```
+
+The forced-command bridge replaces the client-claimed identity with the configured fingerprint mapping and audits the SSH transport and fingerprint privately.
+
+### Forwarding and hostname aliases
+
+Forwards always bind and connect through target loopback. Ports 80 and 443 have narrow default allow rules; other ports become `ASK`:
+
+```bash
+gate forward add --remote-port 443
+gate forward list
+gate forward remove fw_EXAMPLE
+```
+
+Hostname-sensitive HTTPS can use a linked Gate-owned resolver entry:
+
+```bash
+gate host add foo.example.com --remote-port 443
+gate host list
+gate host remove foo.example.com
+```
+
+Gate reports an effective URL such as `https://foo.example.com:18443/`. It only removes resolver lines bearing the exact ownership marker it created. The daemon must have permission to update the configured hosts file (default `/etc/hosts`); use `--hosts-file` to select an explicitly managed alternative. For remote commands, place `--ssh gate@gate-host` before positional resource IDs.
+
+### Policy review
+
+Copy `config/policy-review.example.yaml` to `~/.config/gate/policy-review.yaml`. Analyze completed, agent-safe audit history without changing external state:
+
+```bash
+gate policy-review analyze
+```
+
+When explicitly asked to create a proposal:
+
+```bash
+gate policy-review propose --config ~/.config/gate/policy-review.yaml
+```
+
+The workflow requires repeated successful manual approvals across multiple sessions or targets, rejects unsafe or secret-bearing candidates, adds boundary tests, creates and pushes a `gate/policy-suggestions/...` branch, and opens a pull request. It stops there: a human must review and merge, and deployment remains separate.
+
 ## Goals
 
 - Keep the existing Windmill production-access architecture unchanged where possible.
@@ -152,17 +267,20 @@ Approving an interactive shell would destroy that boundary.
 
 ## Components
 
-Gate can be implemented as one executable with several modes:
+Gate is provided as `gate` plus the shell-compatible `gate-sh` client:
 
 ```bash
 gate daemon
-gate ui
 gate exec
-gate shell
+gate forward
+gate host
+gate history
+gate policy test
+gate policy-review
 gate ssh-server
 ```
 
-Running plain `gate` may start the local daemon and TUI together for convenience.
+Running plain `gate` starts the local daemon and operator console together.
 
 ### Local transport
 
@@ -195,7 +313,7 @@ The SSH key used by an agent should be restricted with a forced command so it ca
 Example `authorized_keys` concept:
 
 ```text
-command="/usr/local/bin/gate ssh-server",no-port-forwarding,no-agent-forwarding <public-key>
+command="GATE_SSH_KEY_FINGERPRINT=SHA256:... /usr/local/bin/gate ssh-server",no-port-forwarding,no-agent-forwarding,no-X11-forwarding,no-pty <public-key>
 ```
 
 The same simple internal protocol can be carried over:
@@ -457,7 +575,7 @@ The first implementation should prefer simple, explicit alias management over ru
 
 ## v0.3: agent skills
 
-v0.3 adds optional skills that teach agentic harnesses how to use Gate correctly.
+v0.3 includes optional skills that teach agentic harnesses how to use Gate correctly.
 
 Suggested skills:
 
@@ -540,7 +658,7 @@ These are architectural rules, not optional implementation details.
 9. Gate records command, decision, actor, target, stdout/stderr metadata, and exit status.
 10. Policy-learning automation proposes pull requests; humans merge and deploy them.
 
-## Proposed implementation stack
+## Implementation stack
 
 Go is the preferred implementation language because:
 
@@ -550,14 +668,13 @@ Go is the preferred implementation language because:
 - terminal UI libraries are strong;
 - SQLite works well without another service.
 
-Likely dependencies:
+Dependencies:
 
 ```text
 Go
-Bubble Tea
-Lip Gloss
 SQLite
-golang.org/x/crypto/ssh
+YAML
+the system OpenSSH client
 ```
 
 Keep dependencies minimal and avoid introducing a service framework unless the design later proves it necessary.
@@ -593,9 +710,9 @@ A possible initial layout:
 └── README.md
 ```
 
-## First useful milestone
+## End-to-end milestone
 
-The first end-to-end milestone is intentionally tiny:
+The first end-to-end path remains intentionally small:
 
 1. `gate` connects to the Bastion host.
 2. Gate lists Sancho sessions for the human operator.

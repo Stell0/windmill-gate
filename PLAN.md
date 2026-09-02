@@ -4,6 +4,21 @@ This document defines the staged implementation plan for Gate, the human-control
 
 The plan intentionally favors a small, auditable design over feature breadth.
 
+## Implementation status
+
+Versions v0.1 through v0.3 are implemented. The code follows the implementation order below with these completed checkpoints:
+
+- opaque target registry and private Windmill backend mapping;
+- bounded Unix-socket NDJSON protocol and `gate-sh` client;
+- immutable command hashing, conservative policy evaluation, and hash-bound approvals;
+- SQLite audit/history and accessible operator console;
+- restricted forced-command SSH bridge with fingerprint-to-identity mapping;
+- concurrent targets/clients, cancellation, and target-scoped temporary rules;
+- loopback-only forwards and exact-marker-owned hostname aliases;
+- harness-neutral Gate skills and a tested policy-analysis/PR workflow that stops before merge or deployment.
+
+The Windmill adapter requires the Sancho command primitives documented in `README.md`. They are an external transport dependency, not reimplemented in Gate. Items under “Later ideas” remain intentionally deferred.
+
 ## Design constraints
 
 The following constraints apply to every version:
