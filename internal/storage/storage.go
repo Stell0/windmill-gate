@@ -404,6 +404,82 @@ func (s *Store) HistoryJSON(ctx context.Context, agentSessionID string, limit in
 	return json.Marshal(entries)
 }
 
+type ForwardRecord struct {
+	ID         string     `json:"id"`
+	TargetID   string     `json:"target_id"`
+	RemoteHost string     `json:"remote_host"`
+	RemotePort uint16     `json:"remote_port"`
+	LocalHost  string     `json:"local_host"`
+	LocalPort  uint16     `json:"local_port"`
+	State      string     `json:"state"`
+	CreatedBy  string     `json:"created_by"`
+	CreatedAt  time.Time  `json:"created_at"`
+	ClosedAt   *time.Time `json:"closed_at,omitempty"`
+}
+
+func (s *Store) SaveForward(ctx context.Context, record ForwardRecord) error {
+	_, err := s.db.ExecContext(ctx, `
+        INSERT INTO forwards(
+            id, target_id, remote_host, remote_port, local_host, local_port,
+            state, created_by, created_at_ns
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		record.ID, record.TargetID, record.RemoteHost, record.RemotePort,
+		record.LocalHost, record.LocalPort, record.State, record.CreatedBy, record.CreatedAt.UnixNano())
+	return wrap("save forward", err)
+}
+
+func (s *Store) CloseForward(ctx context.Context, id string, at time.Time) error {
+	_, err := s.db.ExecContext(ctx, `
+        UPDATE forwards SET state = 'closed', closed_at_ns = ? WHERE id = ? AND state = 'active'`, at.UnixNano(), id)
+	return wrap("close forward", err)
+}
+
+func (s *Store) ActiveForwards(ctx context.Context, targetID string) ([]ForwardRecord, error) {
+	query := `
+        SELECT id, target_id, remote_host, remote_port, local_host, local_port,
+               state, created_by, created_at_ns, closed_at_ns
+        FROM forwards WHERE state = 'active'`
+	args := []any{}
+	if targetID != "" {
+		query += ` AND target_id = ?`
+		args = append(args, targetID)
+	}
+	query += ` ORDER BY created_at_ns`
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query active forwards: %w", err)
+	}
+	defer rows.Close()
+	var result []ForwardRecord
+	for rows.Next() {
+		var record ForwardRecord
+		var created int64
+		var closed sql.NullInt64
+		if err := rows.Scan(
+			&record.ID, &record.TargetID, &record.RemoteHost, &record.RemotePort,
+			&record.LocalHost, &record.LocalPort, &record.State, &record.CreatedBy,
+			&created, &closed,
+		); err != nil {
+			return nil, fmt.Errorf("scan active forward: %w", err)
+		}
+		record.CreatedAt = time.Unix(0, created).UTC()
+		if closed.Valid {
+			value := time.Unix(0, closed.Int64).UTC()
+			record.ClosedAt = &value
+		}
+		result = append(result, record)
+	}
+	return result, wrap("iterate active forwards", rows.Err())
+}
+
+// CloseStaleForwards marks process-backed forwards as closed on daemon start;
+// process handles cannot survive a Gate restart.
+func (s *Store) CloseStaleForwards(ctx context.Context, at time.Time) error {
+	_, err := s.db.ExecContext(ctx, `
+        UPDATE forwards SET state = 'closed', closed_at_ns = ? WHERE state = 'active'`, at.UnixNano())
+	return wrap("close stale forwards", err)
+}
+
 func wrap(operation string, err error) error {
 	if err == nil {
 		return nil

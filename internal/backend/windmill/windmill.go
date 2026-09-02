@@ -141,8 +141,13 @@ func (b *Backend) OpenForward(ctx context.Context, backendTargetID string, req b
 		return nil, errors.New("Windmill forwards are restricted to the selected target loopback")
 	}
 	spec := fmt.Sprintf("127.0.0.1:%d:%s:%d", req.LocalPort, req.RemoteHost, req.RemotePort)
-	args := append(append([]string{}, b.config.SSHArgs...), "-N", "-L", spec, b.config.Bastion,
-		remoteCommand(b.config.Sancho, "session", "forward", backendTargetID))
+	args := append(append([]string{}, b.config.SSHArgs...),
+		"-o", "ExitOnForwardFailure=yes", "-L", spec, b.config.Bastion,
+		remoteCommand(
+			b.config.Sancho, "session", "forward", backendTargetID,
+			"--listen-host", "127.0.0.1", "--listen-port", fmt.Sprint(req.LocalPort),
+			"--remote-host", req.RemoteHost, "--remote-port", fmt.Sprint(req.RemotePort),
+		))
 	proc, err := b.config.runner.Start(ctx, b.config.SSHPath, args, nil, io.Discard, io.Discard)
 	if err != nil {
 		return nil, fmt.Errorf("open remote forward: %s", redact(err.Error(), backendTargetID))
