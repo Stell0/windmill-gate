@@ -36,11 +36,14 @@ import (
 var version = "dev"
 
 func main() {
+	if filepath.Base(os.Args[0]) == "gate-sh" {
+		os.Exit(runShell(os.Args[1:], os.Stdout, os.Stderr))
+	}
 	os.Exit(run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
 }
 
 func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
-	if len(args) == 0 {
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
 		return runServer(args, true, stdin, stdout, stderr)
 	}
 	switch args[0] {
@@ -279,6 +282,39 @@ func runExec(args []string, stdout, stderr io.Writer) int {
 	exitCode, err := client.Exec(ctx, flags.Arg(0))
 	if err != nil {
 		fmt.Fprintf(stderr, "gate: %v\n", err)
+		return 1
+	}
+	return exitCode
+}
+
+func runShell(args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("gate-sh", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	var command, socketPath, agentID, sshHost string
+	var sshArgs repeatedFlag
+	flags.StringVar(&command, "c", "", "execute one non-interactive command")
+	flags.StringVar(&socketPath, "socket", config.SocketPath(), "Gate Unix socket")
+	flags.StringVar(&agentID, "agent", config.AgentIdentity(), "agent identity")
+	flags.StringVar(&sshHost, "ssh", "", "restricted remote Gate SSH host")
+	flags.Var(&sshArgs, "ssh-arg", "additional SSH argument (repeatable)")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if command == "" || flags.NArg() != 0 {
+		fmt.Fprintln(stderr, "usage: gate-sh [-socket path] [-agent identity] [-ssh host] -c command")
+		return 2
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	dialer := agent.UnixDialer(socketPath)
+	if sshHost != "" {
+		dialer = agent.SSHDialer(sshHost, sshArgs, stderr)
+	}
+	exitCode, err := (agent.Client{
+		Dial: dialer, AgentID: agentID, Stdout: stdout, Stderr: stderr,
+	}).Exec(ctx, command)
+	if err != nil {
+		fmt.Fprintf(stderr, "gate-sh: %v\n", err)
 		return 1
 	}
 	return exitCode
