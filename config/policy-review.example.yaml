@@ -1,0 +1,6 @@
+policy_repository: git@github.com:example/gate-policy.git
+base_branch: main
+policy_path: policy/default.yaml
+tests_path: policy/tests/default.yaml
+minimum_approvals: 3
+

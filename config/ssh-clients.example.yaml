@@ -1,0 +1,4 @@
+clients:
+  - fingerprint: "SHA256:replace-with-the-authorized-key-fingerprint"
+    identity: codex-prod
+

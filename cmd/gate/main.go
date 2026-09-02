@@ -27,6 +27,7 @@ import (
 	"github.com/nethserver/gate/internal/policy"
 	"github.com/nethserver/gate/internal/protocol"
 	"github.com/nethserver/gate/internal/remote"
+	"github.com/nethserver/gate/internal/review"
 	"github.com/nethserver/gate/internal/storage"
 	"github.com/nethserver/gate/internal/tui"
 	defaultpolicy "github.com/nethserver/gate/policy"
@@ -57,6 +58,8 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return runSSHServer(args[1:], stdin, stdout, stderr)
 	case "policy":
 		return runPolicy(args[1:], stdout, stderr)
+	case "policy-review":
+		return runPolicyReview(args[1:], stdout, stderr)
 	case "version", "--version", "-version":
 		fmt.Fprintf(stdout, "gate %s\n", version)
 		return 0
@@ -521,6 +524,96 @@ func runPolicy(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
+func runPolicyReview(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 || (args[0] != "analyze" && args[0] != "propose") {
+		fmt.Fprintln(stderr, "usage: gate policy-review analyze|propose [options]")
+		return 2
+	}
+	mode := args[0]
+	flags := flag.NewFlagSet("gate policy-review "+mode, flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	var databasePath, policyPath, reviewConfigPath, label string
+	var minimum int
+	var asJSON bool
+	flags.StringVar(&databasePath, "database", config.DatabasePath(), "Gate audit database")
+	flags.StringVar(&policyPath, "policy", config.PolicyPath(), "currently active Gate policy")
+	flags.StringVar(&reviewConfigPath, "config", config.PolicyReviewPath(), "policy-review repository config")
+	flags.StringVar(&label, "label", "history", "non-sensitive branch label")
+	flags.IntVar(&minimum, "minimum-approvals", 0, "override evidence threshold (minimum 2)")
+	flags.BoolVar(&asJSON, "json", false, "emit candidates as JSON")
+	if err := flags.Parse(args[1:]); err != nil || flags.NArg() != 0 {
+		return 2
+	}
+	var reviewConfig review.Config
+	var err error
+	if mode == "propose" {
+		reviewConfig, err = review.LoadConfig(reviewConfigPath)
+		if err != nil {
+			fmt.Fprintf(stderr, "gate: %v\n", err)
+			return 1
+		}
+		if minimum == 0 {
+			minimum = reviewConfig.MinimumApprovals
+		}
+	}
+	if minimum == 0 {
+		minimum = 3
+	}
+	if minimum < 2 {
+		fmt.Fprintln(stderr, "gate: minimum approvals must be at least 2")
+		return 2
+	}
+	engine, err := policy.Load(policyPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "gate: %v\n", err)
+		return 1
+	}
+	store, err := storage.Open(databasePath)
+	if err != nil {
+		fmt.Fprintf(stderr, "gate: %v\n", err)
+		return 1
+	}
+	defer store.Close()
+	history, err := store.History(context.Background(), "", 10000)
+	if err != nil {
+		fmt.Fprintf(stderr, "gate: %v\n", err)
+		return 1
+	}
+	candidates := review.Analyze(history, engine, minimum)
+	if mode == "analyze" {
+		if asJSON {
+			encoder := json.NewEncoder(stdout)
+			encoder.SetIndent("", "  ")
+			if err := encoder.Encode(candidates); err != nil {
+				fmt.Fprintf(stderr, "gate: encode candidates: %v\n", err)
+				return 1
+			}
+			return 0
+		}
+		if len(candidates) == 0 {
+			fmt.Fprintln(stdout, "No policy candidates met the safety and evidence thresholds.")
+			return 0
+		}
+		for _, candidate := range candidates {
+			fmt.Fprintf(stdout, "%s\n  approvals=%d sessions=%d targets=%d\n  allows: %s\n",
+				candidate.Pattern, candidate.Approvals, candidate.Sessions, candidate.Targets, candidate.AllowedSpace)
+			for _, excluded := range candidate.Excluded {
+				fmt.Fprintf(stdout, "  excludes: %s\n", excluded)
+			}
+		}
+		return 0
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	proposal, err := (review.Workflow{}).Propose(ctx, reviewConfig, candidates, label)
+	if err != nil {
+		fmt.Fprintf(stderr, "gate: policy proposal: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "Created branch: %s\nPull request: %s\nNo policy was merged or deployed; human review is required.\n", proposal.Branch, proposal.PullURL)
+	return 0
+}
+
 func chooseTarget(targets []backend.Target, selector string, input io.Reader, output io.Writer) (backend.Target, error) {
 	if len(targets) == 0 {
 		return backend.Target{}, errors.New("Sancho reported no available sessions")
@@ -590,5 +683,5 @@ func remoteSocketPath(local string) string {
 }
 
 func usage(output io.Writer) {
-	fmt.Fprintln(output, "usage: gate [daemon|exec|forward|host|history|policy test|ssh-server|version]")
+	fmt.Fprintln(output, "usage: gate [daemon|exec|forward|host|history|policy test|policy-review|ssh-server|version]")
 }
