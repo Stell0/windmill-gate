@@ -75,6 +75,16 @@ func TestApprovalViewShowsSecurityContextAndCanApprove(t *testing.T) {
 	}
 }
 
+func TestOperatorTextEscapesTerminalControlSequences(t *testing.T) {
+	rendered := operatorText("before\x1b[2J\nafter")
+	if strings.ContainsRune(rendered, '\x1b') || strings.ContainsRune(rendered, '\n') {
+		t.Fatalf("operator text retained raw terminal controls: %q", rendered)
+	}
+	if !strings.Contains(rendered, `\x1b`) || !strings.Contains(rendered, `\n`) {
+		t.Fatalf("operator text did not visibly preserve escaped bytes: %q", rendered)
+	}
+}
+
 type discardSink struct{}
 
 func (discardSink) Accepted(command.Snapshot, policy.Result) error { return nil }

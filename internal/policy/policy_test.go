@@ -65,6 +65,7 @@ func TestShellCompositionNeverMatchesAllow(t *testing.T) {
 	for _, command := range []string{
 		"uptime; reboot", "uptime && reboot", "uptime | sh", "uptime > /tmp/result",
 		"uptime $(reboot)", "uptime `reboot`", "uptime\nreboot",
+		"uptime \x1b[2J",
 	} {
 		if got := engine.Evaluate("gt_1", command).Decision; got != Ask {
 			t.Errorf("%q = %s, want ASK", command, got)

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 var ErrNotFound = errors.New("gate target not found")
@@ -50,8 +52,8 @@ func (r *Registry) Add(backendName, backendID, displayName string) (Target, erro
 	if strings.TrimSpace(backendID) == "" {
 		return Target{}, errors.New("backend target ID is required")
 	}
-	if strings.TrimSpace(displayName) == "" {
-		return Target{}, errors.New("target display name is required")
+	if err := validateDisplayName(displayName); err != nil {
+		return Target{}, err
 	}
 
 	r.mu.Lock()
@@ -74,6 +76,18 @@ func (r *Registry) Add(backendName, backendID, displayName string) (Target, erro
 		return public, nil
 	}
 	return Target{}, errors.New("could not allocate unique Gate target ID")
+}
+
+func validateDisplayName(value string) error {
+	if strings.TrimSpace(value) == "" || len(value) > 256 || !utf8.ValidString(value) {
+		return errors.New("target display name must be 1-256 UTF-8 bytes")
+	}
+	for _, r := range value {
+		if unicode.IsControl(r) {
+			return errors.New("target display name contains control characters")
+		}
+	}
+	return nil
 }
 
 func (r *Registry) Resolve(id string) (Binding, error) {

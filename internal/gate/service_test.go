@@ -194,6 +194,18 @@ func TestExistingSessionCannotBeSilentlySwitched(t *testing.T) {
 	}
 }
 
+func TestSSHSessionRequiresSafeFingerprint(t *testing.T) {
+	implementation := &fakeBackend{}
+	service, _, store := seededService(t, implementation, policy.Config{})
+	defer store.Close()
+	if _, err := service.OpenSession(context.Background(), "codex-1", "ssh", ""); err == nil {
+		t.Fatal("SSH session without fingerprint was accepted")
+	}
+	if _, err := service.OpenSession(context.Background(), "codex-1", "ssh", "SHA256:key\x1b[2J"); err == nil {
+		t.Fatal("SSH fingerprint with terminal controls was accepted")
+	}
+}
+
 func TestOutputIsBoundedWithMarker(t *testing.T) {
 	implementation := &fakeBackend{stdout: "123456789"}
 	service, session, store := seededService(t, implementation, policy.Config{Allow: []string{`^uptime$`}})

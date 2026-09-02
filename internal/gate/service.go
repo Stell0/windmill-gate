@@ -176,6 +176,9 @@ func (s *Service) OpenSession(ctx context.Context, identity, transport, fingerpr
 	if err := validateIdentity(identity); err != nil {
 		return nil, err
 	}
+	if err := validateFingerprint(transport, fingerprint); err != nil {
+		return nil, err
+	}
 	s.mu.RLock()
 	targetID := s.attachments[identity]
 	s.mu.RUnlock()
@@ -701,6 +704,21 @@ func validateIdentity(identity string) error {
 	for _, r := range identity {
 		if unicode.IsControl(r) {
 			return errors.New("agent identity contains control characters")
+		}
+	}
+	return nil
+}
+
+func validateFingerprint(transport, fingerprint string) error {
+	if transport == "ssh" && fingerprint == "" {
+		return errors.New("SSH agent fingerprint is required")
+	}
+	if len(fingerprint) > 256 || !utf8.ValidString(fingerprint) {
+		return errors.New("agent fingerprint must be at most 256 UTF-8 bytes")
+	}
+	for _, r := range fingerprint {
+		if unicode.IsControl(r) {
+			return errors.New("agent fingerprint contains control characters")
 		}
 	}
 	return nil

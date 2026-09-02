@@ -60,3 +60,9 @@ func TestTargetIDsAreUnique(t *testing.T) {
 		seen[target.ID] = true
 	}
 }
+
+func TestTargetDisplayNameRejectsTerminalControls(t *testing.T) {
+	if _, err := NewRegistry().Add("windmill", "private", "customer\x1b[2J"); err == nil {
+		t.Fatal("terminal control sequence accepted in target display name")
+	}
+}

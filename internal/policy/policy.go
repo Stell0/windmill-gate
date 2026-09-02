@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"unicode"
 
 	"gopkg.in/yaml.v3"
 )
@@ -158,5 +159,13 @@ func compileRules(kind string, patterns []string) ([]compiledRule, error) {
 var unsafeComposition = regexp.MustCompile("(?:;|&&|\\||>>|>|<|\\$\\(|`|\\n|\\r)")
 
 func HasUnsafeComposition(command string) bool {
-	return unsafeComposition.MatchString(command)
+	if unsafeComposition.MatchString(command) {
+		return true
+	}
+	for _, r := range command {
+		if unicode.IsControl(r) {
+			return true
+		}
+	}
+	return false
 }

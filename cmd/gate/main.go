@@ -519,8 +519,9 @@ func runHistory(args []string, stdout, stderr io.Writer) int {
 		if entry.ExitCode != nil {
 			exitCode = strconv.Itoa(*entry.ExitCode)
 		}
-		fmt.Fprintf(stdout, "%s %-10s target=%s agent=%s exit=%s %s\n",
-			entry.CreatedAt.Format(time.RFC3339), entry.State, entry.TargetName, entry.AgentIdentity, exitCode, entry.Command)
+		fmt.Fprintf(stdout, "%s %-10s target=%s agent=%s exit=%s command=%s\n",
+			entry.CreatedAt.Format(time.RFC3339), entry.State, strconv.QuoteToGraphic(entry.TargetName),
+			strconv.QuoteToGraphic(entry.AgentIdentity), exitCode, strconv.QuoteToGraphic(entry.Command))
 	}
 	return 0
 }
@@ -675,7 +676,7 @@ func chooseTarget(targets []backend.Target, selector string, input io.Reader, ou
 	fmt.Fprintln(output, "Available Windmill sessions:")
 	for index, candidate := range targets {
 		// Deliberately show no backend target identifier.
-		fmt.Fprintf(output, "  [%d] %s\n", index+1, candidate.DisplayName)
+		fmt.Fprintf(output, "  [%d] %s\n", index+1, strconv.QuoteToGraphic(candidate.DisplayName))
 	}
 	fmt.Fprint(output, "Select target number: ")
 	line, err := bufio.NewReader(input).ReadString('\n')

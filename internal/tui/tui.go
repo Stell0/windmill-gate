@@ -67,7 +67,7 @@ func (a *App) Run(ctx context.Context) error {
 		case line := <-lines:
 			quit, err := a.handle(ctx, strings.TrimSpace(line))
 			if err != nil {
-				fmt.Fprintf(a.Output, "error: %v\n", err)
+				fmt.Fprintf(a.Output, "error: %s\n", operatorText(err.Error()))
 			}
 			if quit {
 				return nil
@@ -89,10 +89,10 @@ func (a *App) renderTargets() {
 		return
 	}
 	for _, target := range targets {
-		fmt.Fprintf(a.Output, "  %s  %s  backend=%s\n", target.ID, target.DisplayName, target.Backend)
+		fmt.Fprintf(a.Output, "  %s  %s  backend=%s\n", target.ID, operatorText(target.DisplayName), operatorText(target.Backend))
 		for identity, attached := range a.Service.Attachments() {
 			if attached == target.ID {
-				fmt.Fprintf(a.Output, "    agent: %s (future sessions)\n", identity)
+				fmt.Fprintf(a.Output, "    agent: %s (future sessions)\n", operatorText(identity))
 			}
 		}
 	}
@@ -112,9 +112,9 @@ func (a *App) renderPending() {
 			}
 		}
 		fmt.Fprintln(a.Output, "\nWAITING APPROVAL")
-		fmt.Fprintf(a.Output, "  target:  %s\n", targetName)
-		fmt.Fprintf(a.Output, "  agent:   %s\n", a.Service.SessionIdentity(item.Command.AgentSessionID))
-		fmt.Fprintf(a.Output, "  command: %s\n", item.Command.Payload)
+		fmt.Fprintf(a.Output, "  target:  %s\n", operatorText(targetName))
+		fmt.Fprintf(a.Output, "  agent:   %s\n", operatorText(a.Service.SessionIdentity(item.Command.AgentSessionID)))
+		fmt.Fprintf(a.Output, "  command: %s\n", operatorText(item.Command.Payload))
 		fmt.Fprintf(a.Output, "  id:      %s\n", item.Command.ID)
 		fmt.Fprintf(a.Output, "  hash:    %s\n", item.Command.Hash)
 		fmt.Fprintf(a.Output, "  policy:  %s (%s)\n", item.Policy.Decision, item.Policy.Source)
@@ -144,7 +144,7 @@ func (a *App) handle(ctx context.Context, line string) (bool, error) {
 		fmt.Fprintln(a.Output, "\nAVAILABLE BACKEND TARGETS")
 		for index, candidate := range available {
 			// Backend IDs deliberately remain private.
-			fmt.Fprintf(a.Output, "  [%d] %s\n", index+1, candidate.DisplayName)
+			fmt.Fprintf(a.Output, "  [%d] %s\n", index+1, operatorText(candidate.DisplayName))
 		}
 	case "target-add":
 		if a.Backend == nil || len(fields) != 2 {
@@ -158,7 +158,7 @@ func (a *App) handle(ctx context.Context, line string) (bool, error) {
 		if err != nil {
 			return false, err
 		}
-		fmt.Fprintf(a.Output, "added Gate target %s (%s)\n", public.ID, public.DisplayName)
+		fmt.Fprintf(a.Output, "added Gate target %s (%s)\n", public.ID, operatorText(public.DisplayName))
 	case "approvals":
 		a.renderPending()
 	case "agents":
@@ -168,9 +168,9 @@ func (a *App) handle(ctx context.Context, line string) (bool, error) {
 		}
 		fmt.Fprintln(a.Output, "\nACTIVE AGENTS")
 		for _, session := range sessions {
-			fmt.Fprintf(a.Output, "  %s  identity=%s target=%s transport=%s", session.ID, session.Identity, session.TargetID, session.Transport)
+			fmt.Fprintf(a.Output, "  %s  identity=%s target=%s transport=%s", session.ID, operatorText(session.Identity), session.TargetID, operatorText(session.Transport))
 			if session.Fingerprint != "" {
-				fmt.Fprintf(a.Output, " fingerprint=%s", session.Fingerprint)
+				fmt.Fprintf(a.Output, " fingerprint=%s", operatorText(session.Fingerprint))
 			}
 			fmt.Fprintln(a.Output)
 		}
@@ -215,7 +215,7 @@ func (a *App) handle(ctx context.Context, line string) (bool, error) {
 			if entry.ExitCode != nil {
 				exit = strconv.Itoa(*entry.ExitCode)
 			}
-			fmt.Fprintf(a.Output, "  %-10s target=%s agent=%s exit=%s  %s\n", entry.State, entry.TargetName, entry.AgentIdentity, exit, entry.Command)
+			fmt.Fprintf(a.Output, "  %-10s target=%s agent=%s exit=%s command=%s\n", entry.State, operatorText(entry.TargetName), operatorText(entry.AgentIdentity), exit, operatorText(entry.Command))
 			stdout, stderr, err := a.Service.Store.OutputPreview(ctx, entry.ID, 1024)
 			if err != nil {
 				return false, err
@@ -247,8 +247,11 @@ func (a *App) handle(ctx context.Context, line string) (bool, error) {
 }
 
 func indentPreview(value string) string {
-	value = strings.TrimSuffix(value, "\n")
-	return strings.ReplaceAll(value, "\n", "\n      ")
+	return operatorText(value)
+}
+
+func operatorText(value string) string {
+	return strconv.QuoteToGraphic(value)
 }
 
 func (a *App) renderTemporaryRules() {
@@ -256,7 +259,7 @@ func (a *App) renderTemporaryRules() {
 	count := 0
 	for _, target := range a.Service.Targets.List() {
 		for _, rule := range a.Service.Policy.TemporaryRules(target.ID) {
-			fmt.Fprintf(a.Output, "  target=%s (%s)  %s\n", target.DisplayName, target.ID, rule)
+			fmt.Fprintf(a.Output, "  target=%s (%s)  %s\n", operatorText(target.DisplayName), target.ID, operatorText(rule))
 			count++
 		}
 	}
