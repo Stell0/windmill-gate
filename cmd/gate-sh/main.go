@@ -6,11 +6,12 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"os/user"
-	"path/filepath"
 )
 
-import "github.com/nethserver/gate/internal/agent"
+import (
+	"github.com/nethserver/gate/internal/agent"
+	"github.com/nethserver/gate/internal/config"
+)
 
 func main() {
 	os.Exit(run())
@@ -19,8 +20,8 @@ func main() {
 func run() int {
 	var command, socket, agentID string
 	flag.StringVar(&command, "c", "", "execute one non-interactive command")
-	flag.StringVar(&socket, "socket", defaultSocket(), "Gate Unix socket")
-	flag.StringVar(&agentID, "agent", defaultAgent(), "agent identity")
+	flag.StringVar(&socket, "socket", config.SocketPath(), "Gate Unix socket")
+	flag.StringVar(&agentID, "agent", config.AgentIdentity(), "agent identity")
 	flag.Parse()
 	if command == "" || flag.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "usage: gate-sh [-socket path] [-agent identity] -c command")
@@ -40,25 +41,4 @@ func run() int {
 		return 1
 	}
 	return exitCode
-}
-
-func defaultSocket() string {
-	if value := os.Getenv("GATE_SOCKET"); value != "" {
-		return value
-	}
-	runtimeDir := os.Getenv("XDG_RUNTIME_DIR")
-	if runtimeDir == "" {
-		runtimeDir = filepath.Join(os.TempDir(), fmt.Sprintf("gate-%d", os.Getuid()))
-	}
-	return filepath.Join(runtimeDir, "gate.sock")
-}
-
-func defaultAgent() string {
-	if value := os.Getenv("GATE_AGENT_ID"); value != "" {
-		return value
-	}
-	if current, err := user.Current(); err == nil && current.Username != "" {
-		return current.Username
-	}
-	return "local-agent"
 }

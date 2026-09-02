@@ -68,7 +68,6 @@ func (r Request) Validate() error {
 type Response struct {
 	Type      string          `json:"type"`
 	Version   int             `json:"version,omitempty"`
-	SessionID string          `json:"session_id,omitempty"`
 	CommandID string          `json:"command_id,omitempty"`
 	Hash      string          `json:"hash,omitempty"`
 	Policy    string          `json:"policy,omitempty"`

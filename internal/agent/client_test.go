@@ -23,7 +23,7 @@ func TestClientPreservesStreamsAndExitStatus(t *testing.T) {
 			done <- err
 			return
 		}
-		if err := encoder.Encode(protocol.Response{Type: "hello", Version: protocol.Version, SessionID: "as_1"}); err != nil {
+		if err := encoder.Encode(protocol.Response{Type: "hello", Version: protocol.Version}); err != nil {
 			done <- err
 			return
 		}
