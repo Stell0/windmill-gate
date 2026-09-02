@@ -1,0 +1,43 @@
+allow:
+  - command: "uname -a"
+    expect: ALLOW
+  - command: "uptime"
+    expect: ALLOW
+  - command: "df -h"
+    expect: ALLOW
+  - command: "systemctl status redis"
+    expect: ALLOW
+  - command: "journalctl -u redis -n 100"
+    expect: ALLOW
+  - command: "podman logs --tail 100 traefik"
+    expect: ALLOW
+  - command: "ip route show"
+    expect: ALLOW
+
+ask:
+  - command: "grep foo /var/log/messages"
+    expect: ASK
+  - command: "journalctl -u redis --follow"
+    expect: ASK
+  - command: "journalctl -u redis -n 100 --output=json"
+    expect: ASK
+  - command: "uptime && echo ok"
+    expect: ASK
+  - command: "podman ps | grep redis"
+    expect: ASK
+  - command: "cat /etc/shadow"
+    expect: ASK
+
+deny:
+  - command: "uptime; reboot"
+    expect: DENY
+  - command: "rm /tmp/file"
+    expect: DENY
+  - command: "sudo reboot"
+    expect: DENY
+  - command: "systemctl restart redis"
+    expect: DENY
+  - command: "ssh another-host"
+    expect: DENY
+  - command: "dd if=/dev/zero of=/dev/sda"
+    expect: DENY

@@ -1,0 +1,21 @@
+# Gate's persistent policy is deliberately narrow. DENY rules take precedence;
+# anything unmatched or shell-composed is ASK.
+allow:
+  - '^uname(?: -a)?$'
+  - '^uptime$'
+  - '^df(?: -h)?$'
+  - '^free(?: -[hm])?$'
+  - '^systemctl status [a-zA-Z0-9_.@-]+$'
+  - '^journalctl -u [a-zA-Z0-9_.@-]+ -n [0-9]+$'
+  - '^podman ps(?: -a)?$'
+  - '^podman logs --tail [0-9]+ [a-zA-Z0-9_.-]+$'
+  - '^ip (?:addr|route|link)(?: show)?$'
+
+deny:
+  - '(^|[[:space:]])rm([[:space:]]|$)'
+  - '(^|[[:space:]])mkfs(?:\.[a-z0-9]+)?([[:space:]]|$)'
+  - '(^|[[:space:]])dd([[:space:]]|$)'
+  - '(^|[[:space:]])(?:reboot|shutdown|poweroff)([[:space:]]|$)'
+  - '^systemctl (?:stop|restart|disable|mask)(?:[[:space:]]|$)'
+  - '(^|[[:space:]])(?:ssh|scp|sftp|nc|ncat|socat)([[:space:]]|$)'
+
