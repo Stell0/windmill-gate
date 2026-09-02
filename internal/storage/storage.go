@@ -2,6 +2,7 @@
 package storage
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -450,6 +451,42 @@ func (s *Store) HistoryJSON(ctx context.Context, agentSessionID string, limit in
 		return nil, err
 	}
 	return json.Marshal(entries)
+}
+
+func (s *Store) OutputPreview(ctx context.Context, commandID string, limit int) (string, string, error) {
+	if limit <= 0 || limit > 64*1024 {
+		limit = 4096
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT stream, data FROM command_output WHERE command_id = ? ORDER BY sequence`, commandID)
+	if err != nil {
+		return "", "", fmt.Errorf("query output preview: %w", err)
+	}
+	defer rows.Close()
+	var stdout, stderr bytes.Buffer
+	for rows.Next() {
+		var stream string
+		var data []byte
+		if err := rows.Scan(&stream, &data); err != nil {
+			return "", "", fmt.Errorf("scan output preview: %w", err)
+		}
+		destination := &stdout
+		if stream == "stderr" {
+			destination = &stderr
+		}
+		remaining := limit - destination.Len()
+		if remaining <= 0 {
+			continue
+		}
+		if len(data) > remaining {
+			data = data[:remaining]
+		}
+		_, _ = destination.Write(data)
+	}
+	if err := rows.Err(); err != nil {
+		return "", "", fmt.Errorf("iterate output preview: %w", err)
+	}
+	return stdout.String(), stderr.String(), nil
 }
 
 type ForwardRecord struct {

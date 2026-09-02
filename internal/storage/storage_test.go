@@ -121,6 +121,10 @@ func TestOutputLimitAndTruncationMetadata(t *testing.T) {
 	if len(history) != 1 || history[0].OutputBytes != 6 || !history[0].Truncated {
 		t.Fatalf("unexpected output metadata: %#v", history)
 	}
+	stdout, stderr, err := store.OutputPreview(ctx, commandID, 1024)
+	if err != nil || stdout != "1234" || stderr != "56" {
+		t.Fatalf("output preview stdout=%q stderr=%q err=%v", stdout, stderr, err)
+	}
 }
 
 func seededStore(t *testing.T) (*Store, string) {

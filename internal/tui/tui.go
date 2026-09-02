@@ -216,6 +216,16 @@ func (a *App) handle(ctx context.Context, line string) (bool, error) {
 				exit = strconv.Itoa(*entry.ExitCode)
 			}
 			fmt.Fprintf(a.Output, "  %-10s target=%s agent=%s exit=%s  %s\n", entry.State, entry.TargetName, entry.AgentIdentity, exit, entry.Command)
+			stdout, stderr, err := a.Service.Store.OutputPreview(ctx, entry.ID, 1024)
+			if err != nil {
+				return false, err
+			}
+			if stdout != "" {
+				fmt.Fprintf(a.Output, "    stdout: %s\n", indentPreview(stdout))
+			}
+			if stderr != "" {
+				fmt.Fprintf(a.Output, "    stderr: %s\n", indentPreview(stderr))
+			}
 		}
 	case "cancel":
 		if len(fields) != 2 {
@@ -234,6 +244,11 @@ func (a *App) handle(ctx context.Context, line string) (bool, error) {
 		return false, fmt.Errorf("unknown operator command %q", fields[0])
 	}
 	return false, nil
+}
+
+func indentPreview(value string) string {
+	value = strings.TrimSuffix(value, "\n")
+	return strings.ReplaceAll(value, "\n", "\n      ")
 }
 
 func (a *App) renderTemporaryRules() {
