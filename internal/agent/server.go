@@ -17,9 +17,9 @@ import (
 )
 
 type Server struct {
-	Service     *gatecore.Service
-	Transport   string
-	Fingerprint string
+	Service               *gatecore.Service
+	Transport             string
+	TrustHelloFingerprint bool
 }
 
 func ListenUnix(path string) (net.Listener, error) {
@@ -108,7 +108,11 @@ func (s *Server) ServeConn(ctx context.Context, conn io.ReadWriteCloser) error {
 	if transport == "" {
 		transport = "unix"
 	}
-	session, err := s.Service.OpenSession(ctx, hello.Agent, transport, s.Fingerprint)
+	fingerprint := ""
+	if s.TrustHelloFingerprint {
+		fingerprint = hello.Fingerprint
+	}
+	session, err := s.Service.OpenSession(ctx, hello.Agent, transport, fingerprint)
 	if err != nil {
 		_ = encoder.Encode(protocol.Response{Type: "error", Error: err.Error()})
 		return err

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os/exec"
+	"sync"
 
 	"github.com/nethserver/gate/internal/protocol"
 )
@@ -25,6 +27,52 @@ func UnixDialer(path string) Dialer {
 		var dialer net.Dialer
 		return dialer.DialContext(ctx, "unix", path)
 	}
+}
+
+func SSHDialer(host string, args []string, stderr io.Writer) Dialer {
+	return func(ctx context.Context) (io.ReadWriteCloser, error) {
+		if host == "" {
+			return nil, errors.New("Gate SSH host is required")
+		}
+		sshArgs := []string{"-T", "-o", "ClearAllForwardings=yes"}
+		sshArgs = append(sshArgs, args...)
+		sshArgs = append(sshArgs, host)
+		cmd := exec.CommandContext(ctx, "ssh", sshArgs...)
+		stdin, err := cmd.StdinPipe()
+		if err != nil {
+			return nil, fmt.Errorf("open SSH stdin: %w", err)
+		}
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			return nil, fmt.Errorf("open SSH stdout: %w", err)
+		}
+		if stderr != nil {
+			cmd.Stderr = stderr
+		}
+		if err := cmd.Start(); err != nil {
+			return nil, fmt.Errorf("start Gate SSH transport: %w", err)
+		}
+		return &sshConnection{stdin: stdin, stdout: stdout, cmd: cmd}, nil
+	}
+}
+
+type sshConnection struct {
+	stdin  io.WriteCloser
+	stdout io.ReadCloser
+	cmd    *exec.Cmd
+	once   sync.Once
+	err    error
+}
+
+func (c *sshConnection) Read(data []byte) (int, error)  { return c.stdout.Read(data) }
+func (c *sshConnection) Write(data []byte) (int, error) { return c.stdin.Write(data) }
+func (c *sshConnection) Close() error {
+	c.once.Do(func() {
+		_ = c.stdin.Close()
+		c.err = c.cmd.Wait()
+		_ = c.stdout.Close()
+	})
+	return c.err
 }
 
 // Exec submits one immutable command and waits for its terminal response.

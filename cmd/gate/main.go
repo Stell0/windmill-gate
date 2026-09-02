@@ -23,6 +23,8 @@ import (
 	"github.com/nethserver/gate/internal/config"
 	gatecore "github.com/nethserver/gate/internal/gate"
 	"github.com/nethserver/gate/internal/policy"
+	"github.com/nethserver/gate/internal/protocol"
+	"github.com/nethserver/gate/internal/remote"
 	"github.com/nethserver/gate/internal/storage"
 	"github.com/nethserver/gate/internal/tui"
 	defaultpolicy "github.com/nethserver/gate/policy"
@@ -45,6 +47,8 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return runExec(args[1:], stdout, stderr)
 	case "history":
 		return runHistory(args[1:], stdout, stderr)
+	case "ssh-server":
+		return runSSHServer(args[1:], stdin, stdout, stderr)
 	case "policy":
 		return runPolicy(args[1:], stdout, stderr)
 	case "version", "--version", "-version":
@@ -71,10 +75,11 @@ func (f *repeatedFlag) Set(value string) error {
 func runServer(args []string, withUI bool, stdin io.Reader, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("gate", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	var socketPath, databasePath, policyPath, bastion, sancho, selector, agentID, operator string
+	var socketPath, sshSocketPath, databasePath, policyPath, bastion, sancho, selector, agentID, operator string
 	var outputLimit int64
 	var sshArgs repeatedFlag
 	flags.StringVar(&socketPath, "socket", config.SocketPath(), "Unix socket path")
+	flags.StringVar(&sshSocketPath, "ssh-socket", remoteSocketPath(config.SocketPath()), "trusted SSH bridge socket path")
 	flags.StringVar(&databasePath, "database", config.DatabasePath(), "SQLite database path")
 	flags.StringVar(&policyPath, "policy", config.PolicyPath(), "policy YAML path")
 	flags.StringVar(&bastion, "bastion", os.Getenv("GATE_BASTION"), "Bastion SSH host")
@@ -152,15 +157,25 @@ func runServer(args []string, withUI bool, stdin io.Reader, stdout, stderr io.Wr
 		return 1
 	}
 	defer listener.Close()
-	serverErr := make(chan error, 1)
+	sshListener, err := agent.ListenUnix(sshSocketPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "gate: %v\n", err)
+		return 1
+	}
+	defer sshListener.Close()
+	serverErr := make(chan error, 2)
 	go func() {
 		serverErr <- (&agent.Server{Service: service, Transport: "unix"}).Serve(ctx, listener)
 	}()
+	go func() {
+		serverErr <- (&agent.Server{Service: service, Transport: "ssh", TrustHelloFingerprint: true}).Serve(ctx, sshListener)
+	}()
 	fmt.Fprintf(stdout, "Gate target %s (%s) selected\n", public.ID, public.DisplayName)
 	fmt.Fprintf(stdout, "Agent %s attached; listening on %s\n", agentID, socketPath)
+	fmt.Fprintf(stdout, "Restricted SSH bridge socket: %s\n", sshSocketPath)
 
 	if withUI {
-		app := tui.App{Service: service, Operator: operator, Input: stdin, Output: stdout}
+		app := tui.App{Service: service, Backend: implementation, Operator: operator, Input: stdin, Output: stdout}
 		if err := app.Run(ctx); err != nil {
 			fmt.Fprintf(stderr, "gate: operator console: %v\n", err)
 			stop()
@@ -179,11 +194,47 @@ func runServer(args []string, withUI bool, stdin io.Reader, stdout, stderr io.Wr
 	}
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if containsTarget(service, public.ID) {
-		if err := service.DetachTarget(shutdownCtx, public.ID); err != nil {
+	for _, activeTarget := range service.Targets.List() {
+		if err := service.DetachTarget(shutdownCtx, activeTarget.ID); err != nil {
 			fmt.Fprintf(stderr, "gate: detach target: %v\n", err)
 			return 1
 		}
+	}
+	return 0
+}
+
+func runSSHServer(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("gate ssh-server", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	var socketPath, clientsPath string
+	flags.StringVar(&socketPath, "socket", remoteSocketPath(config.SocketPath()), "trusted SSH bridge socket")
+	flags.StringVar(&clientsPath, "clients", config.SSHClientsPath(), "SSH fingerprint mapping YAML")
+	if err := flags.Parse(args); err != nil || flags.NArg() != 0 {
+		return 2
+	}
+	encoder := protocol.NewEncoder(stdout)
+	if original := os.Getenv("SSH_ORIGINAL_COMMAND"); original != "" {
+		err := errors.New("Gate SSH key is restricted to the protocol bridge; remote commands are not accepted")
+		_ = encoder.Encode(protocol.Response{Type: "error", Error: err.Error()})
+		return 1
+	}
+	fingerprint := os.Getenv("GATE_SSH_KEY_FINGERPRINT")
+	if fingerprint == "" {
+		err := errors.New("GATE_SSH_KEY_FINGERPRINT is required in the forced command")
+		_ = encoder.Encode(protocol.Response{Type: "error", Error: err.Error()})
+		return 1
+	}
+	clients, err := remote.LoadClients(clientsPath)
+	if err != nil {
+		_ = encoder.Encode(protocol.Response{Type: "error", Error: err.Error()})
+		return 1
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	bridge := remote.Bridge{Dial: agent.UnixDialer(socketPath), Clients: clients, Fingerprint: fingerprint}
+	if err := bridge.Run(ctx, stdin, stdout); err != nil {
+		fmt.Fprintf(stderr, "gate ssh-server: %v\n", err)
+		return 1
 	}
 	return 0
 }
@@ -345,15 +396,6 @@ func ensurePolicy(path string) error {
 	return nil
 }
 
-func containsTarget(service *gatecore.Service, targetID string) bool {
-	for _, candidate := range service.Targets.List() {
-		if candidate.ID == targetID {
-			return true
-		}
-	}
-	return false
-}
-
 func envOr(name, fallback string) string {
 	if value := os.Getenv(name); value != "" {
 		return value
@@ -361,6 +403,13 @@ func envOr(name, fallback string) string {
 	return fallback
 }
 
+func remoteSocketPath(local string) string {
+	if strings.HasSuffix(local, ".sock") {
+		return strings.TrimSuffix(local, ".sock") + "-ssh.sock"
+	}
+	return local + "-ssh"
+}
+
 func usage(output io.Writer) {
-	fmt.Fprintln(output, "usage: gate [daemon|exec|history|policy test|version]")
+	fmt.Fprintln(output, "usage: gate [daemon|exec|history|policy test|ssh-server|version]")
 }

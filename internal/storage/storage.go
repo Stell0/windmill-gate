@@ -207,6 +207,49 @@ func (s *Store) EndAgentSession(ctx context.Context, id string, at time.Time) er
 	return requireChanged(result, "agent session not found or already ended")
 }
 
+// AgentSessionEntry is operator-only audit data. Fingerprint must not be added
+// to agent protocol responses.
+type AgentSessionEntry struct {
+	ID          string
+	Identity    string
+	TargetID    string
+	Transport   string
+	Fingerprint string
+	StartedAt   time.Time
+	EndedAt     *time.Time
+}
+
+func (s *Store) AgentSessions(ctx context.Context, activeOnly bool) ([]AgentSessionEntry, error) {
+	query := `
+        SELECT id, identity, target_id, transport, COALESCE(fingerprint, ''), started_at_ns, ended_at_ns
+        FROM agent_sessions`
+	if activeOnly {
+		query += ` WHERE ended_at_ns IS NULL`
+	}
+	query += ` ORDER BY started_at_ns DESC`
+	rows, err := s.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("query agent sessions: %w", err)
+	}
+	defer rows.Close()
+	var result []AgentSessionEntry
+	for rows.Next() {
+		var entry AgentSessionEntry
+		var started int64
+		var ended sql.NullInt64
+		if err := rows.Scan(&entry.ID, &entry.Identity, &entry.TargetID, &entry.Transport, &entry.Fingerprint, &started, &ended); err != nil {
+			return nil, fmt.Errorf("scan agent session: %w", err)
+		}
+		entry.StartedAt = time.Unix(0, started).UTC()
+		if ended.Valid {
+			value := time.Unix(0, ended.Int64).UTC()
+			entry.EndedAt = &value
+		}
+		result = append(result, entry)
+	}
+	return result, wrap("iterate agent sessions", rows.Err())
+}
+
 func (s *Store) CreateCommand(ctx context.Context, snapshot command.Snapshot, result policy.Result) error {
 	_, err := s.db.ExecContext(ctx, `
         INSERT INTO commands(

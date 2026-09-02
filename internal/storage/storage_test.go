@@ -160,3 +160,28 @@ func TestPublicHistoryShapeContainsNoPrivateField(t *testing.T) {
 		t.Fatalf("history type exposes backend data: %s", typeOf)
 	}
 }
+
+func TestRemoteClientIdentityAndFingerprintAreAudited(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(filepath.Join(t.TempDir(), "gate.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	registry := target.NewRegistry()
+	public, _ := registry.Add("windmill", "private", "target")
+	binding, _ := registry.Resolve(public.ID)
+	if err := store.SaveTarget(ctx, binding); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.StartAgentSession(ctx, "as_remote", "codex-prod", public.ID, "ssh", "SHA256:key-one", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	sessions, err := store.AgentSessions(ctx, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 1 || sessions[0].Identity != "codex-prod" || sessions[0].Transport != "ssh" || sessions[0].Fingerprint != "SHA256:key-one" {
+		t.Fatalf("remote identity audit mismatch: %#v", sessions)
+	}
+}

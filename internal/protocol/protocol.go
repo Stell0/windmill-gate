@@ -15,13 +15,14 @@ const (
 )
 
 type Request struct {
-	Type       string `json:"type"`
-	Version    int    `json:"version,omitempty"`
-	Agent      string `json:"agent,omitempty"`
-	Command    string `json:"command,omitempty"`
-	CommandID  string `json:"command_id,omitempty"`
-	RemotePort uint16 `json:"remote_port,omitempty"`
-	Hostname   string `json:"hostname,omitempty"`
+	Type        string `json:"type"`
+	Version     int    `json:"version,omitempty"`
+	Agent       string `json:"agent,omitempty"`
+	Fingerprint string `json:"fingerprint,omitempty"`
+	Command     string `json:"command,omitempty"`
+	CommandID   string `json:"command_id,omitempty"`
+	RemotePort  uint16 `json:"remote_port,omitempty"`
+	Hostname    string `json:"hostname,omitempty"`
 }
 
 func (r Request) Validate() error {

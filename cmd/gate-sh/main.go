@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 )
 
 import (
@@ -18,10 +19,13 @@ func main() {
 }
 
 func run() int {
-	var command, socket, agentID string
+	var command, socket, agentID, sshHost string
+	var sshArgs stringList
 	flag.StringVar(&command, "c", "", "execute one non-interactive command")
 	flag.StringVar(&socket, "socket", config.SocketPath(), "Gate Unix socket")
 	flag.StringVar(&agentID, "agent", config.AgentIdentity(), "agent identity")
+	flag.StringVar(&sshHost, "ssh", "", "restricted remote Gate SSH host")
+	flag.Var(&sshArgs, "ssh-arg", "additional SSH argument (repeatable)")
 	flag.Parse()
 	if command == "" || flag.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "usage: gate-sh [-socket path] [-agent identity] -c command")
@@ -29,8 +33,12 @@ func run() int {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
+	dialer := agent.UnixDialer(socket)
+	if sshHost != "" {
+		dialer = agent.SSHDialer(sshHost, sshArgs, os.Stderr)
+	}
 	client := agent.Client{
-		Dial:    agent.UnixDialer(socket),
+		Dial:    dialer,
 		AgentID: agentID,
 		Stdout:  os.Stdout,
 		Stderr:  os.Stderr,
@@ -41,4 +49,12 @@ func run() int {
 		return 1
 	}
 	return exitCode
+}
+
+type stringList []string
+
+func (l *stringList) String() string { return strings.Join(*l, " ") }
+func (l *stringList) Set(value string) error {
+	*l = append(*l, value)
+	return nil
 }

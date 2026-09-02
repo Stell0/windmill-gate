@@ -33,6 +33,13 @@ func PolicyPath() string {
 	return filepath.Join(configHome(), "gate", "policy.yaml")
 }
 
+func SSHClientsPath() string {
+	if value := os.Getenv("GATE_SSH_CLIENTS"); value != "" {
+		return value
+	}
+	return filepath.Join(configHome(), "gate", "ssh-clients.yaml")
+}
+
 func AgentIdentity() string {
 	if value := os.Getenv("GATE_AGENT_ID"); value != "" {
 		return value

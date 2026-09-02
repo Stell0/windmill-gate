@@ -11,14 +11,18 @@ import (
 	"strings"
 
 	"github.com/nethserver/gate/internal/approval"
+	"github.com/nethserver/gate/internal/backend"
 	gatecore "github.com/nethserver/gate/internal/gate"
 )
 
 type App struct {
 	Service  *gatecore.Service
+	Backend  backend.Backend
 	Operator string
 	Input    io.Reader
 	Output   io.Writer
+
+	discovered []backend.Target
 }
 
 func (a *App) Run(ctx context.Context) error {
@@ -74,7 +78,7 @@ func (a *App) Run(ctx context.Context) error {
 
 func (a *App) printBanner() {
 	fmt.Fprintln(a.Output, "Gate operator console")
-	fmt.Fprintln(a.Output, "Commands: targets, attach AGENT TARGET, approvals, rules, a|s|d [COMMAND], history, cancel COMMAND, detach TARGET, quit")
+	fmt.Fprintln(a.Output, "Commands: targets, discover, target-add NUMBER, attach AGENT TARGET, agents, approvals, rules, a|s|d [COMMAND], history, cancel COMMAND, detach TARGET, quit")
 }
 
 func (a *App) renderTargets() {
@@ -128,8 +132,48 @@ func (a *App) handle(ctx context.Context, line string) (bool, error) {
 		return true, nil
 	case "targets":
 		a.renderTargets()
+	case "discover":
+		if a.Backend == nil {
+			return false, errors.New("target discovery backend is unavailable")
+		}
+		available, err := a.Backend.ListTargets(ctx)
+		if err != nil {
+			return false, err
+		}
+		a.discovered = available
+		fmt.Fprintln(a.Output, "\nAVAILABLE BACKEND TARGETS")
+		for index, candidate := range available {
+			// Backend IDs deliberately remain private.
+			fmt.Fprintf(a.Output, "  [%d] %s\n", index+1, candidate.DisplayName)
+		}
+	case "target-add":
+		if a.Backend == nil || len(fields) != 2 {
+			return false, errors.New("usage: discover, then target-add NUMBER")
+		}
+		number, err := strconv.Atoi(fields[1])
+		if err != nil || number < 1 || number > len(a.discovered) {
+			return false, errors.New("invalid discovered target number")
+		}
+		public, err := a.Service.AddTarget(ctx, a.Backend.Name(), a.discovered[number-1])
+		if err != nil {
+			return false, err
+		}
+		fmt.Fprintf(a.Output, "added Gate target %s (%s)\n", public.ID, public.DisplayName)
 	case "approvals":
 		a.renderPending()
+	case "agents":
+		sessions, err := a.Service.Store.AgentSessions(ctx, true)
+		if err != nil {
+			return false, err
+		}
+		fmt.Fprintln(a.Output, "\nACTIVE AGENTS")
+		for _, session := range sessions {
+			fmt.Fprintf(a.Output, "  %s  identity=%s target=%s transport=%s", session.ID, session.Identity, session.TargetID, session.Transport)
+			if session.Fingerprint != "" {
+				fmt.Fprintf(a.Output, " fingerprint=%s", session.Fingerprint)
+			}
+			fmt.Fprintln(a.Output)
+		}
 	case "rules":
 		a.renderTemporaryRules()
 	case "attach":
