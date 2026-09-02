@@ -67,16 +67,24 @@ func (r Request) Validate() error {
 }
 
 type Response struct {
-	Type      string          `json:"type"`
-	Version   int             `json:"version,omitempty"`
-	CommandID string          `json:"command_id,omitempty"`
-	Hash      string          `json:"hash,omitempty"`
-	Policy    string          `json:"policy,omitempty"`
-	State     string          `json:"state,omitempty"`
-	Data      string          `json:"data,omitempty"`
-	Code      *int            `json:"code,omitempty"`
-	Error     string          `json:"error,omitempty"`
-	Items     json.RawMessage `json:"items,omitempty"`
+	Type       string          `json:"type"`
+	Version    int             `json:"version,omitempty"`
+	CommandID  string          `json:"command_id,omitempty"`
+	Hash       string          `json:"hash,omitempty"`
+	Policy     string          `json:"policy,omitempty"`
+	State      string          `json:"state,omitempty"`
+	Data       string          `json:"data,omitempty"`
+	Code       *int            `json:"code,omitempty"`
+	Error      string          `json:"error,omitempty"`
+	ResourceID string          `json:"resource_id,omitempty"`
+	TargetID   string          `json:"target_id,omitempty"`
+	Hostname   string          `json:"hostname,omitempty"`
+	Address    string          `json:"address,omitempty"`
+	LocalHost  string          `json:"local_host,omitempty"`
+	LocalPort  uint16          `json:"local_port,omitempty"`
+	RemotePort uint16          `json:"remote_port,omitempty"`
+	URL        string          `json:"url,omitempty"`
+	Items      json.RawMessage `json:"items,omitempty"`
 }
 
 type Decoder struct {

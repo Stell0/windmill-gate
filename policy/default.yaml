@@ -10,6 +10,7 @@ allow:
   - '^podman ps(?: -a)?$'
   - '^podman logs --tail [0-9]+ [a-zA-Z0-9_.-]+$'
   - '^ip (?:addr|route|link)(?: show)?$'
+  - '^gate forward add --remote-port (?:80|443)$'
 
 deny:
   - '(^|[[:space:]])rm([[:space:]]|$)'
@@ -18,4 +19,3 @@ deny:
   - '(^|[[:space:]])(?:reboot|shutdown|poweroff)([[:space:]]|$)'
   - '^systemctl (?:stop|restart|disable|mask)(?:[[:space:]]|$)'
   - '(^|[[:space:]])(?:ssh|scp|sftp|nc|ncat|socat)([[:space:]]|$)'
-

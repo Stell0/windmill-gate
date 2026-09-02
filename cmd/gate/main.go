@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -21,6 +22,7 @@ import (
 	"github.com/nethserver/gate/internal/backend"
 	"github.com/nethserver/gate/internal/backend/windmill"
 	"github.com/nethserver/gate/internal/config"
+	"github.com/nethserver/gate/internal/forward"
 	gatecore "github.com/nethserver/gate/internal/gate"
 	"github.com/nethserver/gate/internal/policy"
 	"github.com/nethserver/gate/internal/protocol"
@@ -47,6 +49,10 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return runExec(args[1:], stdout, stderr)
 	case "history":
 		return runHistory(args[1:], stdout, stderr)
+	case "forward":
+		return runForward(args[1:], stdout, stderr)
+	case "host":
+		return runHost(args[1:], stdout, stderr)
 	case "ssh-server":
 		return runSSHServer(args[1:], stdin, stdout, stderr)
 	case "policy":
@@ -75,7 +81,7 @@ func (f *repeatedFlag) Set(value string) error {
 func runServer(args []string, withUI bool, stdin io.Reader, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("gate", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	var socketPath, sshSocketPath, databasePath, policyPath, bastion, sancho, selector, agentID, operator string
+	var socketPath, sshSocketPath, databasePath, policyPath, bastion, sancho, selector, agentID, operator, hostsPath string
 	var outputLimit int64
 	var sshArgs repeatedFlag
 	flags.StringVar(&socketPath, "socket", config.SocketPath(), "Unix socket path")
@@ -87,6 +93,7 @@ func runServer(args []string, withUI bool, stdin io.Reader, stdout, stderr io.Wr
 	flags.StringVar(&selector, "target", "", "target display name or displayed number")
 	flags.StringVar(&agentID, "agent", config.AgentIdentity(), "initial attached agent identity")
 	flags.StringVar(&operator, "operator", envOr("GATE_OPERATOR", "operator"), "operator audit identity")
+	flags.StringVar(&hostsPath, "hosts-file", envOr("GATE_HOSTS_FILE", "/etc/hosts"), "Gate-managed hosts file")
 	flags.Int64Var(&outputLimit, "output-limit", gatecore.DefaultOutputLimit, "maximum output bytes per command")
 	flags.Var(&sshArgs, "ssh-arg", "additional SSH argument (repeatable)")
 	if err := flags.Parse(args); err != nil {
@@ -141,6 +148,10 @@ func runServer(args []string, withUI bool, stdin io.Reader, stdout, stderr io.Wr
 	if err := service.SetOutputLimit(outputLimit); err != nil {
 		fmt.Fprintf(stderr, "gate: %v\n", err)
 		return 2
+	}
+	if err := service.EnableForwarding(ctx, hostsPath); err != nil {
+		fmt.Fprintf(stderr, "gate: enable forwarding: %v\n", err)
+		return 1
 	}
 	public, err := service.AddTarget(ctx, implementation.Name(), selected)
 	if err != nil {
@@ -242,9 +253,12 @@ func runSSHServer(args []string, stdin io.Reader, stdout, stderr io.Writer) int 
 func runExec(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("gate exec", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	var socketPath, agentID string
+	var socketPath, agentID, sshHost string
+	var sshArgs repeatedFlag
 	flags.StringVar(&socketPath, "socket", config.SocketPath(), "Unix socket path")
 	flags.StringVar(&agentID, "agent", config.AgentIdentity(), "agent identity")
+	flags.StringVar(&sshHost, "ssh", "", "restricted remote Gate SSH host")
+	flags.Var(&sshArgs, "ssh-arg", "additional SSH argument (repeatable)")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
@@ -254,13 +268,178 @@ func runExec(args []string, stdout, stderr io.Writer) int {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	client := agent.Client{Dial: agent.UnixDialer(socketPath), AgentID: agentID, Stdout: stdout, Stderr: stderr}
+	dialer := agent.UnixDialer(socketPath)
+	if sshHost != "" {
+		dialer = agent.SSHDialer(sshHost, sshArgs, stderr)
+	}
+	client := agent.Client{Dial: dialer, AgentID: agentID, Stdout: stdout, Stderr: stderr}
 	exitCode, err := client.Exec(ctx, flags.Arg(0))
 	if err != nil {
 		fmt.Fprintf(stderr, "gate: %v\n", err)
 		return 1
 	}
 	return exitCode
+}
+
+type connectionOptions struct {
+	socketPath string
+	agentID    string
+	sshHost    string
+	sshArgs    repeatedFlag
+}
+
+func (o *connectionOptions) bind(flags *flag.FlagSet) {
+	flags.StringVar(&o.socketPath, "socket", config.SocketPath(), "Unix socket path")
+	flags.StringVar(&o.agentID, "agent", config.AgentIdentity(), "agent identity")
+	flags.StringVar(&o.sshHost, "ssh", "", "restricted remote Gate SSH host")
+	flags.Var(&o.sshArgs, "ssh-arg", "additional SSH argument (repeatable)")
+}
+
+func (o connectionOptions) client(stderr io.Writer) agent.Client {
+	dialer := agent.UnixDialer(o.socketPath)
+	if o.sshHost != "" {
+		dialer = agent.SSHDialer(o.sshHost, o.sshArgs, stderr)
+	}
+	return agent.Client{Dial: dialer, AgentID: o.agentID, Stderr: stderr}
+}
+
+func runForward(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		fmt.Fprintln(stderr, "usage: gate forward add|list|remove")
+		return 2
+	}
+	flags := flag.NewFlagSet("gate forward "+args[0], flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	var connection connectionOptions
+	connection.bind(flags)
+	var remotePort int
+	if args[0] == "add" {
+		flags.IntVar(&remotePort, "remote-port", 0, "selected target loopback port")
+	}
+	if err := flags.Parse(args[1:]); err != nil {
+		return 2
+	}
+	client := connection.client(stderr)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	var request protocol.Request
+	switch args[0] {
+	case "add":
+		if flags.NArg() != 0 || remotePort < 1 || remotePort > 65535 {
+			fmt.Fprintln(stderr, "usage: gate forward add --remote-port PORT")
+			return 2
+		}
+		request = protocol.Request{Type: "forward_add", RemotePort: uint16(remotePort)}
+	case "list":
+		if flags.NArg() != 0 {
+			return 2
+		}
+		request = protocol.Request{Type: "forward_list"}
+	case "remove":
+		if flags.NArg() != 1 {
+			fmt.Fprintln(stderr, "usage: gate forward remove FORWARD_ID")
+			return 2
+		}
+		request = protocol.Request{Type: "forward_remove", CommandID: flags.Arg(0)}
+	default:
+		fmt.Fprintf(stderr, "gate: unknown forward command %q\n", args[0])
+		return 2
+	}
+	response, err := client.Control(ctx, request)
+	if err != nil {
+		fmt.Fprintf(stderr, "gate: %v\n", err)
+		return 1
+	}
+	switch response.Type {
+	case "forward":
+		fmt.Fprintf(stdout, "forward: %s\ntarget: %s\nremote endpoint: 127.0.0.1:%d\nlocal endpoint: %s\n",
+			response.ResourceID, response.TargetID, response.RemotePort, net.JoinHostPort(response.LocalHost, strconv.Itoa(int(response.LocalPort))))
+	case "forward_list":
+		var items []forward.Info
+		if err := json.Unmarshal(response.Items, &items); err != nil {
+			fmt.Fprintf(stderr, "gate: decode forward list: %v\n", err)
+			return 1
+		}
+		for _, item := range items {
+			fmt.Fprintf(stdout, "%s target=%s remote=127.0.0.1:%d local=%s\n", item.ID, item.TargetID, item.RemotePort, item.Endpoint())
+		}
+	case "forward_removed":
+		fmt.Fprintf(stdout, "removed forward %s\n", response.ResourceID)
+	}
+	return 0
+}
+
+func runHost(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		fmt.Fprintln(stderr, "usage: gate host add|list|remove")
+		return 2
+	}
+	flags := flag.NewFlagSet("gate host "+args[0], flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	var connection connectionOptions
+	connection.bind(flags)
+	var remotePort int
+	if args[0] == "add" {
+		flags.IntVar(&remotePort, "remote-port", 0, "selected target loopback port")
+	}
+	parseArgs := args[1:]
+	leadingHostname := ""
+	if args[0] == "add" && len(parseArgs) > 0 && !strings.HasPrefix(parseArgs[0], "-") {
+		leadingHostname, parseArgs = parseArgs[0], parseArgs[1:]
+	}
+	if err := flags.Parse(parseArgs); err != nil {
+		return 2
+	}
+	var request protocol.Request
+	switch args[0] {
+	case "add":
+		hostname := leadingHostname
+		if hostname == "" && flags.NArg() == 1 {
+			hostname = flags.Arg(0)
+		}
+		if hostname == "" || (leadingHostname != "" && flags.NArg() != 0) || remotePort < 1 || remotePort > 65535 {
+			fmt.Fprintln(stderr, "usage: gate host add HOSTNAME --remote-port PORT")
+			return 2
+		}
+		request = protocol.Request{Type: "host_add", Hostname: hostname, RemotePort: uint16(remotePort)}
+	case "list":
+		if flags.NArg() != 0 {
+			return 2
+		}
+		request = protocol.Request{Type: "host_list"}
+	case "remove":
+		if flags.NArg() != 1 {
+			fmt.Fprintln(stderr, "usage: gate host remove HOSTNAME")
+			return 2
+		}
+		request = protocol.Request{Type: "host_remove", Hostname: flags.Arg(0)}
+	default:
+		fmt.Fprintf(stderr, "gate: unknown host command %q\n", args[0])
+		return 2
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	response, err := connection.client(stderr).Control(ctx, request)
+	if err != nil {
+		fmt.Fprintf(stderr, "gate: %v\n", err)
+		return 1
+	}
+	switch response.Type {
+	case "host":
+		fmt.Fprintf(stdout, "host alias: %s -> %s\nforward: %s\nURL: %s\n", response.Hostname, response.Address, response.ResourceID, response.URL)
+	case "host_list":
+		var items []forward.AliasInfo
+		if err := json.Unmarshal(response.Items, &items); err != nil {
+			fmt.Fprintf(stderr, "gate: decode host list: %v\n", err)
+			return 1
+		}
+		for _, item := range items {
+			fmt.Fprintf(stdout, "%s target=%s forward=%s URL=%s\n", item.Hostname, item.TargetID, item.ForwardID, item.URL)
+		}
+	case "host_removed":
+		fmt.Fprintf(stdout, "removed host alias %s\n", response.Hostname)
+	}
+	return 0
 }
 
 func runHistory(args []string, stdout, stderr io.Writer) int {
@@ -411,5 +590,5 @@ func remoteSocketPath(local string) string {
 }
 
 func usage(output io.Writer) {
-	fmt.Fprintln(output, "usage: gate [daemon|exec|history|policy test|ssh-server|version]")
+	fmt.Fprintln(output, "usage: gate [daemon|exec|forward|host|history|policy test|ssh-server|version]")
 }

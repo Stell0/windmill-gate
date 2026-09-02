@@ -13,6 +13,8 @@ allow:
     expect: ALLOW
   - command: "ip route show"
     expect: ALLOW
+  - command: "gate forward add --remote-port 443"
+    expect: ALLOW
 
 ask:
   - command: "grep foo /var/log/messages"
@@ -26,6 +28,10 @@ ask:
   - command: "podman ps | grep redis"
     expect: ASK
   - command: "cat /etc/shadow"
+    expect: ASK
+  - command: "gate forward add --remote-port 8443"
+    expect: ASK
+  - command: "gate host add foo.example.com --remote-port 443"
     expect: ASK
 
 deny:

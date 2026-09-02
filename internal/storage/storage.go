@@ -88,16 +88,19 @@ CREATE TABLE IF NOT EXISTS forwards (
     state          TEXT NOT NULL,
     created_by     TEXT NOT NULL,
     created_at_ns  INTEGER NOT NULL,
+	closed_by       TEXT,
     closed_at_ns   INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS host_aliases (
-    hostname       TEXT PRIMARY KEY,
+	hostname       TEXT PRIMARY KEY,
     target_id      TEXT NOT NULL REFERENCES targets(id),
     forward_id     TEXT NOT NULL REFERENCES forwards(id),
     address        TEXT NOT NULL,
     managed_marker TEXT NOT NULL,
+	created_by      TEXT NOT NULL,
     created_at_ns  INTEGER NOT NULL,
+	removed_by      TEXT,
     removed_at_ns  INTEGER
 );
 
@@ -140,6 +143,51 @@ func (s *Store) Close() error { return s.db.Close() }
 func (s *Store) migrate(ctx context.Context) error {
 	if _, err := s.db.ExecContext(ctx, schema); err != nil {
 		return fmt.Errorf("migrate database: %w", err)
+	}
+	for _, migration := range []struct {
+		table, column, definition string
+	}{
+		{"forwards", "closed_by", "TEXT"},
+		{"host_aliases", "created_by", "TEXT NOT NULL DEFAULT 'unknown'"},
+		{"host_aliases", "removed_by", "TEXT"},
+	} {
+		if err := s.ensureColumn(ctx, migration.table, migration.column, migration.definition); err != nil {
+			return err
+		}
+	}
+	if _, err := s.db.ExecContext(ctx, `PRAGMA user_version = 2`); err != nil {
+		return fmt.Errorf("set database schema version: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) ensureColumn(ctx context.Context, table, column, definition string) error {
+	rows, err := s.db.QueryContext(ctx, `PRAGMA table_info(`+table+`)`)
+	if err != nil {
+		return fmt.Errorf("inspect %s schema: %w", table, err)
+	}
+	found := false
+	for rows.Next() {
+		var cid int
+		var name, dataType string
+		var notNull, primaryKey int
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &dataType, &notNull, &defaultValue, &primaryKey); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan %s schema: %w", table, err)
+		}
+		if name == column {
+			found = true
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if found {
+		return nil
+	}
+	if _, err := s.db.ExecContext(ctx, `ALTER TABLE `+table+` ADD COLUMN `+column+` `+definition); err != nil {
+		return fmt.Errorf("add %s.%s: %w", table, column, err)
 	}
 	return nil
 }
@@ -415,6 +463,7 @@ type ForwardRecord struct {
 	CreatedBy  string     `json:"created_by"`
 	CreatedAt  time.Time  `json:"created_at"`
 	ClosedAt   *time.Time `json:"closed_at,omitempty"`
+	ClosedBy   string     `json:"closed_by,omitempty"`
 }
 
 func (s *Store) SaveForward(ctx context.Context, record ForwardRecord) error {
@@ -428,16 +477,16 @@ func (s *Store) SaveForward(ctx context.Context, record ForwardRecord) error {
 	return wrap("save forward", err)
 }
 
-func (s *Store) CloseForward(ctx context.Context, id string, at time.Time) error {
+func (s *Store) CloseForward(ctx context.Context, id, actor string, at time.Time) error {
 	_, err := s.db.ExecContext(ctx, `
-        UPDATE forwards SET state = 'closed', closed_at_ns = ? WHERE id = ? AND state = 'active'`, at.UnixNano(), id)
+		UPDATE forwards SET state = 'closed', closed_by = ?, closed_at_ns = ? WHERE id = ? AND state = 'active'`, actor, at.UnixNano(), id)
 	return wrap("close forward", err)
 }
 
 func (s *Store) ActiveForwards(ctx context.Context, targetID string) ([]ForwardRecord, error) {
 	query := `
         SELECT id, target_id, remote_host, remote_port, local_host, local_port,
-               state, created_by, created_at_ns, closed_at_ns
+		       state, created_by, created_at_ns, closed_at_ns, COALESCE(closed_by, '')
         FROM forwards WHERE state = 'active'`
 	args := []any{}
 	if targetID != "" {
@@ -458,7 +507,7 @@ func (s *Store) ActiveForwards(ctx context.Context, targetID string) ([]ForwardR
 		if err := rows.Scan(
 			&record.ID, &record.TargetID, &record.RemoteHost, &record.RemotePort,
 			&record.LocalHost, &record.LocalPort, &record.State, &record.CreatedBy,
-			&created, &closed,
+			&created, &closed, &record.ClosedBy,
 		); err != nil {
 			return nil, fmt.Errorf("scan active forward: %w", err)
 		}
@@ -476,8 +525,80 @@ func (s *Store) ActiveForwards(ctx context.Context, targetID string) ([]ForwardR
 // process handles cannot survive a Gate restart.
 func (s *Store) CloseStaleForwards(ctx context.Context, at time.Time) error {
 	_, err := s.db.ExecContext(ctx, `
-        UPDATE forwards SET state = 'closed', closed_at_ns = ? WHERE state = 'active'`, at.UnixNano())
+		UPDATE forwards SET state = 'closed', closed_by = 'daemon-restart', closed_at_ns = ? WHERE state = 'active'`, at.UnixNano())
 	return wrap("close stale forwards", err)
+}
+
+type HostAliasRecord struct {
+	Hostname  string     `json:"hostname"`
+	TargetID  string     `json:"target_id"`
+	ForwardID string     `json:"forward_id"`
+	Address   string     `json:"address"`
+	Marker    string     `json:"-"`
+	CreatedBy string     `json:"created_by"`
+	CreatedAt time.Time  `json:"created_at"`
+	RemovedBy string     `json:"removed_by,omitempty"`
+	RemovedAt *time.Time `json:"removed_at,omitempty"`
+}
+
+func (s *Store) SaveHostAlias(ctx context.Context, record HostAliasRecord) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO host_aliases(hostname, target_id, forward_id, address, managed_marker, created_by, created_at_ns, removed_at_ns)
+		VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
+		ON CONFLICT(hostname) DO UPDATE SET
+			target_id = excluded.target_id,
+			forward_id = excluded.forward_id,
+			address = excluded.address,
+			managed_marker = excluded.managed_marker,
+			created_by = excluded.created_by,
+			created_at_ns = excluded.created_at_ns,
+			removed_by = NULL,
+			removed_at_ns = NULL
+		WHERE host_aliases.removed_at_ns IS NOT NULL`,
+		record.Hostname, record.TargetID, record.ForwardID, record.Address, record.Marker, record.CreatedBy, record.CreatedAt.UnixNano())
+	return wrap("save host alias", err)
+}
+
+func (s *Store) RemoveHostAlias(ctx context.Context, hostname, actor string, at time.Time) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE host_aliases SET removed_by = ?, removed_at_ns = ? WHERE hostname = ? AND removed_at_ns IS NULL`, actor, at.UnixNano(), hostname)
+	return wrap("remove host alias", err)
+}
+
+func (s *Store) ActiveHostAliases(ctx context.Context, targetID string) ([]HostAliasRecord, error) {
+	query := `
+		SELECT hostname, target_id, forward_id, address, managed_marker, created_by, created_at_ns, removed_at_ns, COALESCE(removed_by, '')
+        FROM host_aliases WHERE removed_at_ns IS NULL`
+	args := []any{}
+	if targetID != "" {
+		query += ` AND target_id = ?`
+		args = append(args, targetID)
+	}
+	query += ` ORDER BY created_at_ns`
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query host aliases: %w", err)
+	}
+	defer rows.Close()
+	var result []HostAliasRecord
+	for rows.Next() {
+		var record HostAliasRecord
+		var created int64
+		var removed sql.NullInt64
+		if err := rows.Scan(
+			&record.Hostname, &record.TargetID, &record.ForwardID, &record.Address,
+			&record.Marker, &record.CreatedBy, &created, &removed, &record.RemovedBy,
+		); err != nil {
+			return nil, fmt.Errorf("scan host alias: %w", err)
+		}
+		record.CreatedAt = time.Unix(0, created).UTC()
+		if removed.Valid {
+			value := time.Unix(0, removed.Int64).UTC()
+			record.RemovedAt = &value
+		}
+		result = append(result, record)
+	}
+	return result, wrap("iterate host aliases", rows.Err())
 }
 
 func wrap(operation string, err error) error {

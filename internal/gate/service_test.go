@@ -3,8 +3,8 @@ package gate
 import (
 	"bytes"
 	"context"
-	"errors"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -42,8 +42,19 @@ func (b *fakeBackend) Exec(_ context.Context, targetID string, req backend.ExecR
 	return backend.ExecResult{ExitCode: b.exitCode}, b.err
 }
 func (b *fakeBackend) OpenForward(context.Context, string, backend.ForwardRequest) (backend.Forward, error) {
-	return nil, errors.New("not implemented")
+	return &serviceTestForward{done: make(chan struct{})}, nil
 }
+
+type serviceTestForward struct {
+	once sync.Once
+	done chan struct{}
+}
+
+func (f *serviceTestForward) Close() error {
+	f.once.Do(func() { close(f.done) })
+	return nil
+}
+func (f *serviceTestForward) Wait() error { <-f.done; return nil }
 
 type recordingSink struct {
 	mu       sync.Mutex
@@ -196,6 +207,43 @@ func TestOutputIsBoundedWithMarker(t *testing.T) {
 	}
 	if got := sink.stdout.String(); got != "12345\n[gate: output truncated]\n" {
 		t.Fatalf("unexpected bounded output: %q", got)
+	}
+}
+
+func TestForwardAndAliasAreTargetScopedAndCleanedOnDetach(t *testing.T) {
+	implementation := &fakeBackend{}
+	service, session, store := seededService(t, implementation, policy.Config{Allow: []string{
+		`^gate forward add --remote-port 443$`,
+		`^gate host add foo\.example\.com --remote-port 443$`,
+	}})
+	defer store.Close()
+	hostsPath := filepath.Join(t.TempDir(), "hosts")
+	if err := os.WriteFile(hostsPath, []byte("127.0.0.1 localhost\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.EnableForwarding(context.Background(), hostsPath); err != nil {
+		t.Fatal(err)
+	}
+	forwardInfo, forwardCommand, authorized, err := session.AddForward(context.Background(), 443, &recordingSink{})
+	if err != nil || !authorized || forwardInfo.RemoteHost != "127.0.0.1" || forwardCommand.State != command.Succeeded {
+		t.Fatalf("forward result = %#v, %#v, %v, %v", forwardInfo, forwardCommand, authorized, err)
+	}
+	alias, aliasCommand, authorized, err := session.AddHostAlias(context.Background(), "Foo.Example.com.", 443, &recordingSink{})
+	if err != nil || !authorized || alias.URL == "" || aliasCommand.State != command.Succeeded {
+		t.Fatalf("alias result = %#v, %#v, %v, %v", alias, aliasCommand, authorized, err)
+	}
+	if alias.ForwardID != forwardInfo.ID {
+		t.Fatalf("alias did not reuse matching forward: alias=%s forward=%s", alias.ForwardID, forwardInfo.ID)
+	}
+	if err := service.DetachTarget(context.Background(), session.TargetID); err != nil {
+		t.Fatal(err)
+	}
+	if len(service.Forwards.List(session.TargetID)) != 0 || len(service.Aliases.List(session.TargetID)) != 0 {
+		t.Fatal("network resources survived target detach")
+	}
+	data, _ := os.ReadFile(hostsPath)
+	if strings.Contains(string(data), "foo.example.com") {
+		t.Fatalf("Gate-owned resolver entry survived detach: %s", data)
 	}
 }
 

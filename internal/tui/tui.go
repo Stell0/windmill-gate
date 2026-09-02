@@ -78,7 +78,7 @@ func (a *App) Run(ctx context.Context) error {
 
 func (a *App) printBanner() {
 	fmt.Fprintln(a.Output, "Gate operator console")
-	fmt.Fprintln(a.Output, "Commands: targets, discover, target-add NUMBER, attach AGENT TARGET, agents, approvals, rules, a|s|d [COMMAND], history, cancel COMMAND, detach TARGET, quit")
+	fmt.Fprintln(a.Output, "Commands: targets, discover, target-add NUMBER, attach AGENT TARGET, agents, approvals, rules, forwards, hosts, a|s|d [COMMAND], history, cancel COMMAND, detach TARGET, quit")
 }
 
 func (a *App) renderTargets() {
@@ -176,6 +176,24 @@ func (a *App) handle(ctx context.Context, line string) (bool, error) {
 		}
 	case "rules":
 		a.renderTemporaryRules()
+	case "forwards":
+		fmt.Fprintln(a.Output, "\nACTIVE FORWARDS")
+		if a.Service.Forwards == nil {
+			fmt.Fprintln(a.Output, "  (forwarding disabled)")
+			break
+		}
+		for _, item := range a.Service.Forwards.List("") {
+			fmt.Fprintf(a.Output, "  %s target=%s remote=127.0.0.1:%d local=%s\n", item.ID, item.TargetID, item.RemotePort, item.Endpoint())
+		}
+	case "hosts":
+		fmt.Fprintln(a.Output, "\nACTIVE HOST ALIASES")
+		if a.Service.Aliases == nil {
+			fmt.Fprintln(a.Output, "  (host aliases disabled)")
+			break
+		}
+		for _, item := range a.Service.Aliases.List("") {
+			fmt.Fprintf(a.Output, "  %s target=%s forward=%s URL=%s\n", item.Hostname, item.TargetID, item.ForwardID, item.URL)
+		}
 	case "attach":
 		if len(fields) != 3 {
 			return false, errors.New("usage: attach AGENT TARGET")

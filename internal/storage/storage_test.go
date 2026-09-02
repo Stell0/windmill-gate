@@ -3,6 +3,7 @@ package storage
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -183,5 +184,47 @@ func TestRemoteClientIdentityAndFingerprintAreAudited(t *testing.T) {
 	}
 	if len(sessions) != 1 || sessions[0].Identity != "codex-prod" || sessions[0].Transport != "ssh" || sessions[0].Fingerprint != "SHA256:key-one" {
 		t.Fatalf("remote identity audit mismatch: %#v", sessions)
+	}
+}
+
+func TestOpenMigratesV1ForwardAndAliasAuditColumns(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "gate.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`
+		CREATE TABLE forwards (
+			id TEXT PRIMARY KEY, target_id TEXT, remote_host TEXT, remote_port INTEGER,
+			local_host TEXT, local_port INTEGER, state TEXT, created_by TEXT,
+			created_at_ns INTEGER, closed_at_ns INTEGER
+		);
+		CREATE TABLE host_aliases (
+			hostname TEXT PRIMARY KEY, target_id TEXT, forward_id TEXT, address TEXT,
+			managed_marker TEXT, created_at_ns INTEGER, removed_at_ns INTEGER
+		);`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = db.Close()
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	for table, columns := range map[string][]string{
+		"forwards":     {"closed_by"},
+		"host_aliases": {"created_by", "removed_by"},
+	} {
+		for _, column := range columns {
+			var count int
+			query := `SELECT COUNT(*) FROM pragma_table_info('` + table + `') WHERE name = ?`
+			if err := store.db.QueryRow(query, column).Scan(&count); err != nil {
+				t.Fatal(err)
+			}
+			if count != 1 {
+				t.Errorf("migration omitted %s.%s", table, column)
+			}
+		}
 	}
 }

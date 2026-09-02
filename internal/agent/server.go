@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"sync"
 
 	"github.com/nethserver/gate/internal/command"
+	"github.com/nethserver/gate/internal/forward"
 	gatecore "github.com/nethserver/gate/internal/gate"
 	"github.com/nethserver/gate/internal/policy"
 	"github.com/nethserver/gate/internal/protocol"
@@ -134,17 +136,11 @@ func (s *Server) ServeConn(ctx context.Context, conn io.ReadWriteCloser) error {
 		_ = encoder.Encode(protocol.Response{Type: "error", Error: err.Error()})
 		return err
 	}
-	if request.Type != "exec" {
-		err := fmt.Errorf("expected one exec request, got %q", request.Type)
-		_ = encoder.Encode(protocol.Response{Type: "error", Error: err.Error()})
-		return err
-	}
-
-	execCtx, cancel := context.WithCancel(ctx)
+	requestCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	done := make(chan error, 1)
 	sink := &protocolSink{encoder: encoder}
-	go func() { done <- session.Exec(execCtx, []byte(request.Command), sink) }()
+	go func() { done <- s.runRequest(requestCtx, session, request, sink) }()
 
 	// A second frame can only cancel the one running command. EOF means the
 	// agent disconnected, which also cancels execution and remains auditable.
@@ -178,19 +174,90 @@ func (s *Server) ServeConn(ctx context.Context, conn io.ReadWriteCloser) error {
 			_ = sink.Error(err.Error())
 			return err
 		}
-		if err := s.Service.CancelSessionCommand(session, next.CommandID); err != nil {
+		if commandID := sink.CommandID(); commandID == "" || commandID != next.CommandID {
 			cancel()
 			<-done
+			err := errors.New("cancel command ID does not match the active request")
 			_ = sink.Error(err.Error())
 			return err
 		}
+		cancel()
 		return <-done
 	}
 }
 
+func (s *Server) runRequest(ctx context.Context, session *gatecore.Session, request protocol.Request, sink *protocolSink) error {
+	zero := 0
+	switch request.Type {
+	case "exec":
+		return session.Exec(ctx, []byte(request.Command), sink)
+	case "forward_add":
+		info, snapshot, authorized, err := session.AddForward(ctx, request.RemotePort, sink)
+		if err != nil || !authorized {
+			return err
+		}
+		if err := sink.Forward(info); err != nil {
+			return err
+		}
+		return sink.Exit(snapshot, zero)
+	case "forward_list":
+		items, err := session.ListForwards()
+		if err != nil {
+			_ = sink.Error(err.Error())
+			return err
+		}
+		if err := sink.List("forward_list", items); err != nil {
+			return err
+		}
+		return sink.Exit(command.Snapshot{}, zero)
+	case "forward_remove":
+		if err := session.RemoveForward(ctx, request.CommandID); err != nil {
+			_ = sink.Error(err.Error())
+			return err
+		}
+		if err := sink.send(protocol.Response{Type: "forward_removed", ResourceID: request.CommandID}); err != nil {
+			return err
+		}
+		return sink.Exit(command.Snapshot{}, zero)
+	case "host_add":
+		info, snapshot, authorized, err := session.AddHostAlias(ctx, request.Hostname, request.RemotePort, sink)
+		if err != nil || !authorized {
+			return err
+		}
+		if err := sink.Host(info); err != nil {
+			return err
+		}
+		return sink.Exit(snapshot, zero)
+	case "host_list":
+		items, err := session.ListHostAliases()
+		if err != nil {
+			_ = sink.Error(err.Error())
+			return err
+		}
+		if err := sink.List("host_list", items); err != nil {
+			return err
+		}
+		return sink.Exit(command.Snapshot{}, zero)
+	case "host_remove":
+		if err := session.RemoveHostAlias(ctx, request.Hostname); err != nil {
+			_ = sink.Error(err.Error())
+			return err
+		}
+		if err := sink.send(protocol.Response{Type: "host_removed", Hostname: request.Hostname}); err != nil {
+			return err
+		}
+		return sink.Exit(command.Snapshot{}, zero)
+	default:
+		err := fmt.Errorf("request type %q is unavailable on this channel", request.Type)
+		_ = sink.Error(err.Error())
+		return err
+	}
+}
+
 type protocolSink struct {
-	mu      sync.Mutex
-	encoder *protocol.Encoder
+	mu        sync.Mutex
+	encoder   *protocol.Encoder
+	commandID string
 }
 
 func (s *protocolSink) send(response protocol.Response) error {
@@ -200,10 +267,19 @@ func (s *protocolSink) send(response protocol.Response) error {
 }
 
 func (s *protocolSink) Accepted(cmd command.Snapshot, result policy.Result) error {
+	s.mu.Lock()
+	s.commandID = cmd.ID
+	s.mu.Unlock()
 	return s.send(protocol.Response{
 		Type: "accepted", CommandID: cmd.ID, Hash: cmd.Hash,
 		Policy: string(result.Decision), State: string(cmd.State),
 	})
+}
+
+func (s *protocolSink) CommandID() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.commandID
 }
 
 func (s *protocolSink) State(cmd command.Snapshot) error {
@@ -220,4 +296,27 @@ func (s *protocolSink) Exit(cmd command.Snapshot, code int) error {
 
 func (s *protocolSink) Error(message string) error {
 	return s.send(protocol.Response{Type: "error", Error: message})
+}
+
+func (s *protocolSink) Forward(info forward.Info) error {
+	return s.send(protocol.Response{
+		Type: "forward", ResourceID: info.ID, TargetID: info.TargetID,
+		LocalHost: info.LocalHost, LocalPort: info.LocalPort, RemotePort: info.RemotePort,
+	})
+}
+
+func (s *protocolSink) Host(info forward.AliasInfo) error {
+	return s.send(protocol.Response{
+		Type: "host", ResourceID: info.ForwardID, TargetID: info.TargetID,
+		Hostname: info.Hostname, Address: info.Address, LocalPort: info.LocalPort,
+		RemotePort: info.RemotePort, URL: info.URL,
+	})
+}
+
+func (s *protocolSink) List(kind string, value any) error {
+	items, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	return s.send(protocol.Response{Type: kind, Items: items})
 }

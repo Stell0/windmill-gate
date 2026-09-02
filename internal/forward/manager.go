@@ -141,7 +141,7 @@ func (m *Manager) List(targetID string) []Info {
 	return result
 }
 
-func (m *Manager) Close(ctx context.Context, targetID, id string) error {
+func (m *Manager) Close(ctx context.Context, targetID, id, actor string) error {
 	m.mu.Lock()
 	item, ok := m.forwards[id]
 	if !ok {
@@ -155,15 +155,15 @@ func (m *Manager) Close(ctx context.Context, targetID, id string) error {
 	delete(m.forwards, id)
 	m.mu.Unlock()
 	handleErr := item.handle.Close()
-	storeErr := m.store.CloseForward(context.WithoutCancel(ctx), id, time.Now().UTC())
+	storeErr := m.store.CloseForward(context.WithoutCancel(ctx), id, actor, time.Now().UTC())
 	return errors.Join(ignoreProcessDone(handleErr), storeErr)
 }
 
-func (m *Manager) CloseTarget(ctx context.Context, targetID string) error {
+func (m *Manager) CloseTarget(ctx context.Context, targetID, actor string) error {
 	items := m.List(targetID)
 	var result error
 	for _, item := range items {
-		result = errors.Join(result, m.Close(ctx, targetID, item.ID))
+		result = errors.Join(result, m.Close(ctx, targetID, item.ID, actor))
 	}
 	return result
 }
@@ -177,7 +177,7 @@ func (m *Manager) wait(item *managed) {
 	}
 	m.mu.Unlock()
 	if ok {
-		_ = m.store.CloseForward(context.Background(), item.info.ID, time.Now().UTC())
+		_ = m.store.CloseForward(context.Background(), item.info.ID, "transport", time.Now().UTC())
 	}
 }
 

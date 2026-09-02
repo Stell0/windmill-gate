@@ -86,7 +86,7 @@ func TestForwardIsLoopbackTargetScopedAndAudited(t *testing.T) {
 	if err != nil || len(records) != 1 || records[0].ID != info.ID {
 		t.Fatalf("forward audit mismatch: %#v, %v", records, err)
 	}
-	if err := manager.Close(ctx, "gt_two", info.ID); !errors.Is(err, ErrWrongTarget) {
+	if err := manager.Close(ctx, "gt_two", info.ID, "operator"); !errors.Is(err, ErrWrongTarget) {
 		t.Fatalf("cross-target removal allowed: %v", err)
 	}
 }
@@ -104,7 +104,7 @@ func TestTargetCleanupClosesAllForwards(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := manager.CloseTarget(ctx, "gt_one"); err != nil {
+	if err := manager.CloseTarget(ctx, "gt_one", "operator"); err != nil {
 		t.Fatal(err)
 	}
 	if len(manager.List("gt_one")) != 0 {

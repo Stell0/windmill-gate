@@ -115,9 +115,9 @@ func (b Bridge) Run(ctx context.Context, input io.Reader, output io.Writer) erro
 	if err := remoteDecoder.Decode(&request); err != nil {
 		return fail(err)
 	}
-	if err := request.Validate(); err != nil || request.Type != "exec" {
+	if err := request.Validate(); err != nil || request.Type == "hello" || request.Type == "cancel" {
 		if err == nil {
-			err = errors.New("SSH Gate accepts one exec request")
+			err = errors.New("SSH Gate accepts one command or capability request")
 		}
 		return fail(err)
 	}

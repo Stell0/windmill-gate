@@ -17,6 +17,7 @@ import (
 	"github.com/nethserver/gate/internal/approval"
 	"github.com/nethserver/gate/internal/backend"
 	"github.com/nethserver/gate/internal/command"
+	"github.com/nethserver/gate/internal/forward"
 	"github.com/nethserver/gate/internal/policy"
 	"github.com/nethserver/gate/internal/storage"
 	"github.com/nethserver/gate/internal/target"
@@ -43,6 +44,8 @@ type Service struct {
 	Policy    *policy.Engine
 	Approvals *approval.Broker
 	Store     *storage.Store
+	Forwards  *forward.Manager
+	Aliases   *forward.AliasManager
 
 	backends map[string]backend.Backend
 	limit    int64
@@ -51,6 +54,33 @@ type Service struct {
 	attachments map[string]string
 	sessions    map[string]*Session
 	running     map[string]runningCommand
+}
+
+func (s *Service) EnableForwarding(ctx context.Context, hostsPath string) error {
+	manager, err := forward.NewManager(ctx, s, s.Store)
+	if err != nil {
+		return err
+	}
+	aliases, err := forward.NewAliasManager(ctx, hostsPath, s.Store, manager)
+	if err != nil {
+		return err
+	}
+	s.Forwards, s.Aliases = manager, aliases
+	return nil
+}
+
+// ResolveBackend is for Gate-owned forwarding code only. The returned private
+// identifier must never enter an agent protocol response.
+func (s *Service) ResolveBackend(targetID string) (backend.Backend, string, error) {
+	binding, err := s.Targets.Resolve(targetID)
+	if err != nil {
+		return nil, "", err
+	}
+	implementation := s.backends[binding.Backend]
+	if implementation == nil {
+		return nil, "", errors.New("target backend is unavailable")
+	}
+	return implementation, binding.BackendID, nil
 }
 
 type runningCommand struct {
@@ -371,6 +401,202 @@ func (s *Service) Attachments() map[string]string {
 	return result
 }
 
+// AddForward evaluates a synthetic, exact capability command through the same
+// ALLOW/ASK/DENY and immutable approval path as a remote shell command.
+func (s *Session) AddForward(ctx context.Context, remotePort uint16, sink EventSink) (forward.Info, command.Snapshot, bool, error) {
+	if remotePort == 0 {
+		return forward.Info{}, command.Snapshot{}, false, errors.New("remote port must be between 1 and 65535")
+	}
+	payload := []byte(fmt.Sprintf("gate forward add --remote-port %d", remotePort))
+	cmd, authorized, err := s.service.authorizeCapability(ctx, s, payload, sink)
+	if err != nil || !authorized {
+		return forward.Info{}, snapshotOf(cmd), false, err
+	}
+	if s.service.Forwards == nil {
+		err = errors.New("Gate forwarding is not enabled")
+	} else {
+		var info forward.Info
+		info, err = s.service.Forwards.Add(ctx, s.TargetID, remotePort, s.Identity)
+		if err == nil {
+			snapshot, finishErr := s.service.completeCapability(ctx, cmd, sink, nil)
+			return info, snapshot, true, finishErr
+		}
+	}
+	snapshot, finishErr := s.service.completeCapability(ctx, cmd, sink, err)
+	return forward.Info{}, snapshot, true, errors.Join(err, finishErr)
+}
+
+func (s *Session) ListForwards() ([]forward.Info, error) {
+	if s.service.Forwards == nil {
+		return nil, errors.New("Gate forwarding is not enabled")
+	}
+	return s.service.Forwards.List(s.TargetID), nil
+}
+
+func (s *Session) RemoveForward(ctx context.Context, id string) error {
+	if s.service.Forwards == nil || s.service.Aliases == nil {
+		return errors.New("Gate forwarding is not enabled")
+	}
+	if err := s.service.Aliases.CloseForward(ctx, s.TargetID, id, s.Identity); err != nil {
+		return err
+	}
+	return s.service.Forwards.Close(ctx, s.TargetID, id, s.Identity)
+}
+
+func (s *Session) AddHostAlias(ctx context.Context, hostname string, remotePort uint16, sink EventSink) (forward.AliasInfo, command.Snapshot, bool, error) {
+	if remotePort == 0 {
+		return forward.AliasInfo{}, command.Snapshot{}, false, errors.New("remote port must be between 1 and 65535")
+	}
+	var err error
+	hostname, err = forward.NormalizeHostname(hostname)
+	if err != nil {
+		return forward.AliasInfo{}, command.Snapshot{}, false, err
+	}
+	payload := []byte(fmt.Sprintf("gate host add %s --remote-port %d", hostname, remotePort))
+	cmd, authorized, err := s.service.authorizeCapability(ctx, s, payload, sink)
+	if err != nil || !authorized {
+		return forward.AliasInfo{}, snapshotOf(cmd), false, err
+	}
+	if s.service.Forwards == nil || s.service.Aliases == nil {
+		err = errors.New("Gate forwarding is not enabled")
+		snapshot, finishErr := s.service.completeCapability(ctx, cmd, sink, err)
+		return forward.AliasInfo{}, snapshot, true, errors.Join(err, finishErr)
+	}
+	var linked forward.Info
+	created := false
+	for _, candidate := range s.service.Forwards.List(s.TargetID) {
+		if candidate.RemotePort == remotePort {
+			linked = candidate
+			break
+		}
+	}
+	if linked.ID == "" {
+		linked, err = s.service.Forwards.Add(ctx, s.TargetID, remotePort, s.Identity)
+		created = err == nil
+	}
+	if err == nil {
+		var alias forward.AliasInfo
+		alias, err = s.service.Aliases.Add(ctx, s.TargetID, linked.ID, hostname, s.Identity)
+		if err == nil {
+			snapshot, finishErr := s.service.completeCapability(ctx, cmd, sink, nil)
+			return alias, snapshot, true, finishErr
+		}
+	}
+	if created {
+		_ = s.service.Forwards.Close(context.WithoutCancel(ctx), s.TargetID, linked.ID, "alias-rollback")
+	}
+	snapshot, finishErr := s.service.completeCapability(ctx, cmd, sink, err)
+	return forward.AliasInfo{}, snapshot, true, errors.Join(err, finishErr)
+}
+
+func (s *Session) ListHostAliases() ([]forward.AliasInfo, error) {
+	if s.service.Aliases == nil {
+		return nil, errors.New("Gate host aliases are not enabled")
+	}
+	return s.service.Aliases.List(s.TargetID), nil
+}
+
+func (s *Session) RemoveHostAlias(ctx context.Context, hostname string) error {
+	if s.service.Aliases == nil {
+		return errors.New("Gate host aliases are not enabled")
+	}
+	return s.service.Aliases.Remove(ctx, s.TargetID, hostname, s.Identity)
+}
+
+func (s *Service) authorizeCapability(ctx context.Context, session *Session, payload []byte, sink EventSink) (*command.Command, bool, error) {
+	if sink == nil {
+		return nil, false, errors.New("event sink is required")
+	}
+	cmd, err := command.New(session.ID, session.TargetID, payload)
+	if err != nil {
+		return nil, false, err
+	}
+	result := s.Policy.Evaluate(session.TargetID, string(payload))
+	if err := s.Store.CreateCommand(ctx, cmd.Snapshot(), result); err != nil {
+		return cmd, false, err
+	}
+	if err := sink.Accepted(cmd.Snapshot(), result); err != nil {
+		return cmd, false, err
+	}
+	switch result.Decision {
+	case policy.Deny:
+		return cmd, false, s.finishDenied(ctx, cmd, sink, "policy")
+	case policy.Allow:
+	case policy.Ask:
+		if err := cmd.Transition(command.Waiting, nil); err != nil {
+			return cmd, false, err
+		}
+		if err := s.Store.UpdateCommand(ctx, cmd.Snapshot()); err != nil {
+			return cmd, false, err
+		}
+		if err := sink.State(cmd.Snapshot()); err != nil {
+			return cmd, false, err
+		}
+		decision, err := s.Approvals.Wait(ctx, cmd, result)
+		if err != nil {
+			_ = cmd.Transition(command.Cancelled, nil)
+			_ = s.Store.UpdateCommand(context.WithoutCancel(ctx), cmd.Snapshot())
+			return cmd, false, err
+		}
+		if err := s.Store.RecordApproval(ctx, decision); err != nil {
+			return cmd, false, err
+		}
+		if decision.Action == approval.Deny {
+			return cmd, false, s.finishDenied(ctx, cmd, sink, decision.Actor)
+		}
+		if decision.Action == approval.AllowTarget {
+			if err := s.Policy.AllowForTarget(session.TargetID, decision.Rule); err != nil {
+				return cmd, false, err
+			}
+		}
+	default:
+		return cmd, false, fmt.Errorf("unsupported policy result %q", result.Decision)
+	}
+	snapshot := cmd.Snapshot()
+	if err := cmd.VerifyApproval(snapshot.ID, snapshot.Hash); err != nil {
+		return cmd, false, err
+	}
+	if err := cmd.Transition(command.Running, nil); err != nil {
+		return cmd, false, err
+	}
+	if err := s.Store.UpdateCommand(ctx, cmd.Snapshot()); err != nil {
+		return cmd, false, err
+	}
+	if err := sink.State(cmd.Snapshot()); err != nil {
+		return cmd, false, err
+	}
+	return cmd, true, nil
+}
+
+func (s *Service) completeCapability(ctx context.Context, cmd *command.Command, sink EventSink, operationErr error) (command.Snapshot, error) {
+	exitCode := 0
+	state := command.Succeeded
+	if operationErr != nil {
+		exitCode, state = 1, command.Failed
+	}
+	if err := cmd.Transition(state, &exitCode); err != nil {
+		return cmd.Snapshot(), err
+	}
+	if err := s.Store.UpdateCommand(context.WithoutCancel(ctx), cmd.Snapshot()); err != nil {
+		return cmd.Snapshot(), err
+	}
+	if err := sink.State(cmd.Snapshot()); err != nil {
+		return cmd.Snapshot(), err
+	}
+	if operationErr != nil {
+		_ = sink.Error(operationErr.Error())
+		_ = sink.Exit(cmd.Snapshot(), exitCode)
+	}
+	return cmd.Snapshot(), nil
+}
+
+func snapshotOf(cmd *command.Command) command.Snapshot {
+	if cmd == nil {
+		return command.Snapshot{}
+	}
+	return cmd.Snapshot()
+}
+
 func (s *Service) CancelSessionCommand(session *Session, commandID string) error {
 	s.mu.RLock()
 	running, ok := s.running[commandID]
@@ -398,6 +624,16 @@ func (s *Service) DetachTarget(ctx context.Context, targetID string) error {
 		}
 	}
 	s.mu.Unlock()
+	if s.Aliases != nil {
+		if err := s.Aliases.CloseTarget(ctx, targetID, "target-detach"); err != nil {
+			return err
+		}
+	}
+	if s.Forwards != nil {
+		if err := s.Forwards.CloseTarget(ctx, targetID, "target-detach"); err != nil {
+			return err
+		}
+	}
 	if _, err := s.Targets.Remove(targetID); err != nil {
 		return err
 	}
