@@ -48,6 +48,21 @@ func TestMalformedAndOversizedFramesAreRejected(t *testing.T) {
 	}
 }
 
+func TestFrameBetweenReaderBufferAndLimitIsAccepted(t *testing.T) {
+	command := strings.Repeat("x", 128*1024)
+	var wire bytes.Buffer
+	if err := NewEncoder(&wire).Encode(Request{Type: "exec", Command: command}); err != nil {
+		t.Fatal(err)
+	}
+	var request Request
+	if err := NewDecoder(&wire).Decode(&request); err != nil {
+		t.Fatal(err)
+	}
+	if request.Command != command {
+		t.Fatalf("large valid command changed: got %d bytes, want %d", len(request.Command), len(command))
+	}
+}
+
 func TestExecRequestHasNoTargetOrBackendField(t *testing.T) {
 	var req Request
 	err := NewDecoder(strings.NewReader(`{"type":"exec","command":"uptime","target_id":"gt_other","backend_id":"secret"}` + "\n")).Decode(&req)

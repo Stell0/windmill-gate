@@ -96,15 +96,23 @@ func NewDecoder(reader io.Reader) *Decoder {
 }
 
 func (d *Decoder) Decode(value any) error {
-	frame, err := d.reader.ReadSlice('\n')
-	if errors.Is(err, bufio.ErrBufferFull) || len(frame) > MaxFrameSize {
-		return errors.New("protocol frame exceeds 1 MiB")
-	}
-	if err != nil && !errors.Is(err, io.EOF) {
-		return err
-	}
-	if len(frame) == 0 && errors.Is(err, io.EOF) {
-		return io.EOF
+	frame := make([]byte, 0, 64*1024)
+	for {
+		part, err := d.reader.ReadSlice('\n')
+		if len(frame)+len(part) > MaxFrameSize {
+			return errors.New("protocol frame exceeds 1 MiB")
+		}
+		frame = append(frame, part...)
+		if errors.Is(err, bufio.ErrBufferFull) {
+			continue
+		}
+		if err != nil && !errors.Is(err, io.EOF) {
+			return err
+		}
+		if len(frame) == 0 && errors.Is(err, io.EOF) {
+			return io.EOF
+		}
+		break
 	}
 	if frame[len(frame)-1] == '\n' {
 		frame = frame[:len(frame)-1]
