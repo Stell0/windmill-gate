@@ -1,0 +1,162 @@
+package storage
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/nethserver/gate/internal/approval"
+	"github.com/nethserver/gate/internal/command"
+	"github.com/nethserver/gate/internal/policy"
+	"github.com/nethserver/gate/internal/target"
+)
+
+func TestAuditRecordsSurviveRestartWithoutLeakingBackendID(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "gate.db")
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := target.NewRegistry()
+	public, err := registry.Add("windmill", "windmill-private-4837291", "customer.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding, _ := registry.Resolve(public.ID)
+	if err := store.SaveTarget(ctx, binding); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.StartAgentSession(ctx, "as_test", "codex-1", public.ID, "unix", "", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	cmd, err := command.New("as_test", public.ID, []byte("uptime"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := policy.Result{Decision: policy.Ask, Source: "default"}
+	if err := store.CreateCommand(ctx, cmd.Snapshot(), result); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := cmd.Snapshot()
+	decision := approval.Decision{CommandID: snapshot.ID, Hash: snapshot.Hash, Action: approval.ApproveOnce, Actor: "operator", DecidedAt: time.Now()}
+	if err := store.RecordApproval(ctx, decision); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Transition(command.Running, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpdateCommand(ctx, cmd.Snapshot()); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.AppendOutput(ctx, snapshot.ID, "stdout", []byte("healthy\\n"), 1024); err != nil {
+		t.Fatal(err)
+	}
+	exitCode := 0
+	if err := cmd.Transition(command.Succeeded, &exitCode); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpdateCommand(ctx, cmd.Snapshot()); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	history, err := store.HistoryJSON(ctx, "as_test", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(history, []byte("windmill-private-4837291")) {
+		t.Fatalf("backend ID leaked through history: %s", history)
+	}
+	var entries []HistoryEntry
+	if err := json.Unmarshal(history, &entries); err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].State != command.Succeeded || entries[0].OutputBytes != 9 {
+		t.Fatalf("audit history did not survive restart: %#v", entries)
+	}
+	mode, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode.Mode().Perm() != 0o600 {
+		t.Fatalf("database permissions = %o, want 600", mode.Mode().Perm())
+	}
+}
+
+func TestOutputLimitAndTruncationMetadata(t *testing.T) {
+	ctx := context.Background()
+	store, commandID := seededStore(t)
+	defer store.Close()
+
+	first, truncated, err := store.AppendOutput(ctx, commandID, "stdout", []byte("1234"), 6)
+	if err != nil || truncated || string(first) != "1234" {
+		t.Fatalf("first append = %q, %v, %v", first, truncated, err)
+	}
+	second, truncated, err := store.AppendOutput(ctx, commandID, "stderr", []byte("56789"), 6)
+	if err != nil || !truncated || string(second) != "56" {
+		t.Fatalf("second append = %q, %v, %v", second, truncated, err)
+	}
+	third, truncated, err := store.AppendOutput(ctx, commandID, "stdout", []byte("ignored"), 6)
+	if err != nil || !truncated || len(third) != 0 {
+		t.Fatalf("third append = %q, %v, %v", third, truncated, err)
+	}
+	history, err := store.History(ctx, "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(history) != 1 || history[0].OutputBytes != 6 || !history[0].Truncated {
+		t.Fatalf("unexpected output metadata: %#v", history)
+	}
+}
+
+func seededStore(t *testing.T) (*Store, string) {
+	t.Helper()
+	ctx := context.Background()
+	store, err := Open(filepath.Join(t.TempDir(), "gate.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := target.NewRegistry()
+	public, err := registry.Add("windmill", "private", "test target")
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding, _ := registry.Resolve(public.ID)
+	if err := store.SaveTarget(ctx, binding); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.StartAgentSession(ctx, "as_test", "agent", public.ID, "unix", "", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	cmd, err := command.New("as_test", public.ID, []byte("uptime"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateCommand(ctx, cmd.Snapshot(), policy.Result{Decision: policy.Allow, Source: "persistent"}); err != nil {
+		t.Fatal(err)
+	}
+	return store, cmd.Snapshot().ID
+}
+
+func TestPublicHistoryShapeContainsNoPrivateField(t *testing.T) {
+	typeOf, err := json.Marshal(HistoryEntry{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(typeOf), "backend") {
+		t.Fatalf("history type exposes backend data: %s", typeOf)
+	}
+}
