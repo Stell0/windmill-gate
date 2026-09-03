@@ -15,6 +15,102 @@ allow:
     expect: ALLOW
   - command: "gate forward add --remote-port 443"
     expect: ALLOW
+  - command: "hostnamectl --static"
+    expect: ALLOW
+  - command: "id"
+    expect: ALLOW
+  - command: "cat /etc/os-release"
+    expect: ALLOW
+  - command: "cat /proc/sys/fs/file-nr"
+    expect: ALLOW
+  - command: "findmnt -n -o TARGET --target /home"
+    expect: ALLOW
+  - command: "systemctl status api-server --no-pager"
+    expect: ALLOW
+  - command: "systemctl --no-pager --type=service --state=failed"
+    expect: ALLOW
+  - command: "systemctl list-units --all 'nethvoice1*' --no-pager"
+    expect: ALLOW
+  - command: "journalctl -b --no-pager -n 200"
+    expect: ALLOW
+  - command: "journalctl -p err -b --no-pager -n 1000"
+    expect: ALLOW
+  - command: "journalctl -u api-server --no-pager -n 200"
+    expect: ALLOW
+  - command: "podman ps --format '{{.Names}}\\t{{.Status}}'"
+    expect: ALLOW
+  - command: "podman system info --format='{{.Store.VolumePath}}'"
+    expect: ALLOW
+  - command: "podman volume ls"
+    expect: ALLOW
+  - command: "firewall-cmd --get-active-zones"
+    expect: ALLOW
+  - command: "firewall-cmd --list-all-zones"
+    expect: ALLOW
+  - command: "logcli labels module_id -q"
+    expect: ALLOW
+  - command: "api-cli --help"
+    expect: ALLOW
+  - command: "api-cli run list-actions"
+    expect: ALLOW
+  - command: "api-cli run get-cluster-status"
+    expect: ALLOW
+  - command: "api-cli run list-installed-modules"
+    expect: ALLOW
+  - command: "api-cli run module/mail1/list-actions"
+    expect: ALLOW
+  - command: "api-cli run module/mail1/get-status"
+    expect: ALLOW
+  - command: "api-cli run list-routes --agent module/traefik1"
+    expect: ALLOW
+  - command: "api-cli run list-routes --agent module/traefik1 --data '{\"expand_list\":true}'"
+    expect: ALLOW
+  - command: "api-cli run get-route --agent module/traefik1 --data '{\"instance\":\"mail1\"}'"
+    expect: ALLOW
+  - command: "api-cli run list-certificates --agent module/traefik1"
+    expect: ALLOW
+  - command: "runagent -m mail1 systemctl --user list-units --all --no-pager"
+    expect: ALLOW
+  - command: "runagent -m mail1 systemctl --user status postfix.service --no-pager"
+    expect: ALLOW
+  - command: "runagent -m mail1 systemctl --user --failed --no-legend --no-pager"
+    expect: ALLOW
+  - command: "runagent -m mail1 journalctl --user -u postfix.service --no-pager -n 200"
+    expect: ALLOW
+  - command: "runagent -m mail1 journalctl --user --no-pager -n 200"
+    expect: ALLOW
+  - command: "runagent -m mail1 podman ps -a"
+    expect: ALLOW
+  - command: "runagent -m mail1 podman ps -a --format '{{.Names}} [Status:{{.Status}}] [Restarts:{{.Restarts}}]'"
+    expect: ALLOW
+  - command: "runagent -m mail1 podman logs --tail 200 postfix"
+    expect: ALLOW
+  - command: "runagent -m mail1 podman system info --format='{{.Store.VolumePath}}'"
+    expect: ALLOW
+  - command: "runagent -m mail1 podman volume ls"
+    expect: ALLOW
+  - command: "redis-cli --scan --pattern 'module/*/srv/*/*'"
+    expect: ALLOW
+  - command: "redis-cli --scan --pattern 'module/mail1/*'"
+    expect: ALLOW
+  - command: "redis-cli --scan --pattern 'module/*/environment'"
+    expect: ALLOW
+  - command: "redis-cli --raw get cluster/default_instance/traefik"
+    expect: ALLOW
+  - command: "redis-cli --raw HGETALL cluster/module_node"
+    expect: ALLOW
+  - command: "redis-cli get module/mail1/ui_name"
+    expect: ALLOW
+  - command: "redis-cli --raw HGET \"module/mail1/environment\" IMAGE_URL"
+    expect: ALLOW
+  - command: "runagent -m nethvoice1 podman exec freepbx cat /etc/resolv.conf"
+    expect: ALLOW
+  - command: "runagent -m nethvoice1 podman exec freepbx pgrep asterisk"
+    expect: ALLOW
+  - command: "runagent -m nethvoice1 podman exec freepbx asterisk -rx 'pjsip show contacts'"
+    expect: ALLOW
+  - command: "runagent -m nethvoice1 podman exec freepbx asterisk -rx 'database show CF'"
+    expect: ALLOW
 
 ask:
   - command: "grep foo /var/log/messages"
@@ -32,6 +128,56 @@ ask:
   - command: "gate forward add --remote-port 8443"
     expect: ASK
   - command: "gate host add foo.example.com --remote-port 443"
+    expect: ASK
+  - command: "journalctl -u redis -n 0"
+    expect: ASK
+  - command: "journalctl -u redis -n 1001"
+    expect: ASK
+  - command: "podman logs --tail 1001 traefik"
+    expect: ASK
+  - command: "systemctl status api-server --no-pager --full"
+    expect: ASK
+  - command: "systemctl list-units --all '*' --no-pager"
+    expect: ASK
+  - command: "api-cli login"
+    expect: ASK
+  - command: "api-cli run list-actions | jq ."
+    expect: ASK
+  - command: "api-cli run module/mail1/get-configuration"
+    expect: ASK
+  - command: "api-cli run module/mail1/configure-module --data '{}'"
+    expect: ASK
+  - command: "api-cli run update-module --data '{}'"
+    expect: ASK
+  - command: "api-cli run set-route --agent module/traefik1 --data '{}'"
+    expect: ASK
+  - command: "api-cli run get-certificate --agent module/traefik1 --data '{\"fqdn\":\"example.org\"}'"
+    expect: ASK
+  - command: "runagent -m mail1 systemctl --user restart postfix.service"
+    expect: ASK
+  - command: "runagent -m mail1 podman inspect postfix"
+    expect: ASK
+  - command: "runagent -m mail1 podman logs --tail 1001 postfix"
+    expect: ASK
+  - command: "runagent -m mail1 sh -lc 'id'"
+    expect: ASK
+  - command: "redis-cli HGETALL module/mail1/environment"
+    expect: ASK
+  - command: "redis-cli --raw KEYS 'node/*/vpn'"
+    expect: ASK
+  - command: "redis-cli PUBLISH module/mail1/event/reload '{}'"
+    expect: ASK
+  - command: "redis-cli SET module/mail1/ui_name changed"
+    expect: ASK
+  - command: "podman rmi ghcr.io/nethserver/mail:latest"
+    expect: ASK
+  - command: "add-module mail 1"
+    expect: ASK
+  - command: "remove-module mail1"
+    expect: ASK
+  - command: "runagent -m nethvoice1 podman exec freepbx getent hosts ibm.com"
+    expect: ASK
+  - command: "runagent -m nethvoice1 podman exec freepbx asterisk -rx 'database del AMPUSER/ cidname'"
     expect: ASK
 
 deny:
