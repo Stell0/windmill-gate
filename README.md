@@ -69,7 +69,7 @@ In another terminal, submit exactly one command:
 bin/gate-sh --agent codex-1 -c 'uname -a'
 ```
 
-Unknown commands wait in the operator console. Use `a` to approve once, `s` for a memory-only similar rule scoped to that target until detach, or `d` to deny. `gate daemon` runs without the console and is therefore suitable only when submitted commands are already classified `ALLOW` or `DENY`.
+Unknown commands wait in the operator console. Type `a` then Enter to approve once, `s` then Enter for a memory-only similar rule scoped to that target until detach, or `d` then Enter to deny. `gate daemon` runs without the console and is therefore suitable only when submitted commands are already classified `ALLOW` or `DENY`.
 
 Default local paths are:
 

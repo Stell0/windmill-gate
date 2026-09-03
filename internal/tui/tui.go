@@ -54,23 +54,46 @@ func (a *App) Run(ctx context.Context) error {
 
 	a.printBanner()
 	a.renderTargets()
-	a.renderPending()
+	pending := a.Service.Approvals.List()
+	a.renderPendingItems(pending)
+	displayedPending := pendingSignature(pending)
+	promptVisible := false
 	for {
-		fmt.Fprint(a.Output, "gate> ")
+		if !promptVisible {
+			fmt.Fprint(a.Output, "gate> ")
+			promptVisible = true
+		}
 		select {
 		case <-ctx.Done():
 			return nil
 		case err := <-scanErrors:
 			return err
 		case <-a.Service.Approvals.Changed():
-			a.renderPending()
+			pending := a.Service.Approvals.List()
+			signature := pendingSignature(pending)
+			if signature == displayedPending {
+				continue
+			}
+			displayedPending = signature
+			if len(pending) == 0 {
+				continue
+			}
+			a.renderPendingItems(pending)
+			promptVisible = false
 		case line := <-lines:
+			promptVisible = false
 			quit, err := a.handle(ctx, strings.TrimSpace(line))
 			if err != nil {
 				fmt.Fprintf(a.Output, "error: %s\n", operatorText(err.Error()))
 			}
 			if quit {
 				return nil
+			}
+			pending := a.Service.Approvals.List()
+			signature := pendingSignature(pending)
+			if signature != displayedPending {
+				displayedPending = signature
+				a.renderPendingItems(pending)
 			}
 		}
 	}
@@ -99,7 +122,10 @@ func (a *App) renderTargets() {
 }
 
 func (a *App) renderPending() {
-	pending := a.Service.Approvals.List()
+	a.renderPendingItems(a.Service.Approvals.List())
+}
+
+func (a *App) renderPendingItems(pending []approval.Pending) {
 	if len(pending) == 0 {
 		return
 	}
@@ -118,8 +144,16 @@ func (a *App) renderPending() {
 		fmt.Fprintf(a.Output, "  id:      %s\n", item.Command.ID)
 		fmt.Fprintf(a.Output, "  hash:    %s\n", item.Command.Hash)
 		fmt.Fprintf(a.Output, "  policy:  %s (%s)\n", item.Policy.Decision, item.Policy.Source)
-		fmt.Fprintln(a.Output, "  [a] approve once  [s] allow similar for target until detach  [d] deny")
+		fmt.Fprintln(a.Output, "  [a] approve once  [s] allow similar for target until detach  [d] deny  (press Enter)")
 	}
+}
+
+func pendingSignature(pending []approval.Pending) string {
+	ids := make([]string, len(pending))
+	for index, item := range pending {
+		ids[index] = item.Command.ID
+	}
+	return strings.Join(ids, "\x00")
 }
 
 func (a *App) handle(ctx context.Context, line string) (bool, error) {
