@@ -317,6 +317,7 @@ func legacySSHCommand(connection targetConnection, targetCommand string, forward
 	args := []string{
 		"ssh",
 		"-o", "BatchMode=yes",
+		"-o", "LogLevel=ERROR",
 		"-o", "UserKnownHostsFile=/dev/null",
 		"-o", "StrictHostKeyChecking=no",
 		"-p", strconv.Itoa(connection.port),

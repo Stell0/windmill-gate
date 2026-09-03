@@ -175,6 +175,9 @@ func TestLegacyExecUsesSanchoConnectionMetadataAndPreservesExitCode(t *testing.T
 	if !strings.Contains(remote, shellQuote("root@"+vpn)) || !strings.Contains(remote, shellQuote("981")) {
 		t.Fatalf("legacy connection metadata missing from remote command: %s", remote)
 	}
+	if !strings.Contains(remote, shellQuote("LogLevel=ERROR")) || !strings.Contains(remote, shellQuote("UserKnownHostsFile=/dev/null")) {
+		t.Fatalf("legacy SSH warning suppression is missing: %s", remote)
+	}
 	combined := stdout.String() + stderr.String()
 	if strings.Contains(combined, backendID) || strings.Contains(combined, vpn) {
 		t.Fatalf("private connection data leaked: %q", combined)
