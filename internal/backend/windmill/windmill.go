@@ -77,10 +77,12 @@ func New(config Config) (*Backend, error) {
 func (b *Backend) Name() string { return "windmill" }
 
 type sanchoSession struct {
-	ID     json.RawMessage `json:"id"`
-	Name   string          `json:"name"`
-	Host   string          `json:"host"`
-	Status string          `json:"status"`
+	ID      json.RawMessage `json:"id"`
+	Session json.RawMessage `json:"session"`
+	Name    string          `json:"name"`
+	Host    string          `json:"host"`
+	Server  string          `json:"server"`
+	Status  string          `json:"status"`
 }
 
 func (b *Backend) ListTargets(ctx context.Context) ([]backend.Target, error) {
@@ -95,26 +97,83 @@ func (b *Backend) ListTargets(ctx context.Context) ([]backend.Target, error) {
 		return nil, fmt.Errorf("list Windmill sessions: %s", message)
 	}
 
-	var sessions []sanchoSession
-	if err := json.Unmarshal(stdout.Bytes(), &sessions); err != nil {
+	sessions, err := parseSessions(stdout.Bytes())
+	if err != nil {
 		return nil, fmt.Errorf("parse Sancho session list: %w", err)
 	}
 	targets := make([]backend.Target, 0, len(sessions))
 	for _, session := range sessions {
-		id, err := rawID(session.ID)
+		id, err := rawID(session.backendID())
 		if err != nil {
 			return nil, fmt.Errorf("parse Sancho session: %w", err)
 		}
-		display := session.Name
-		if display == "" {
-			display = session.Host
-		}
+		display := session.displayName()
 		if display == "" {
 			display = "Windmill target"
 		}
 		targets = append(targets, backend.Target{ID: id, DisplayName: display})
 	}
 	return targets, nil
+}
+
+func parseSessions(data []byte) ([]sanchoSession, error) {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	values := make([]json.RawMessage, 0, 1)
+	for {
+		var value json.RawMessage
+		if err := decoder.Decode(&value); err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return nil, err
+		}
+		values = append(values, value)
+	}
+	if len(values) == 0 {
+		return nil, errors.New("empty JSON output")
+	}
+
+	first := bytes.TrimSpace(values[0])
+	if len(first) > 0 && first[0] == '[' {
+		if len(values) != 1 {
+			return nil, errors.New("unexpected JSON value after session array")
+		}
+		var sessions []sanchoSession
+		if err := json.Unmarshal(first, &sessions); err != nil {
+			return nil, err
+		}
+		return sessions, nil
+	}
+
+	sessions := make([]sanchoSession, 0, len(values))
+	for _, value := range values {
+		trimmed := bytes.TrimSpace(value)
+		if len(trimmed) == 0 || trimmed[0] != '{' {
+			return nil, errors.New("session stream contains a non-object JSON value")
+		}
+		var session sanchoSession
+		if err := json.Unmarshal(trimmed, &session); err != nil {
+			return nil, err
+		}
+		sessions = append(sessions, session)
+	}
+	return sessions, nil
+}
+
+func (s sanchoSession) backendID() json.RawMessage {
+	if len(bytes.TrimSpace(s.ID)) > 0 && !bytes.Equal(bytes.TrimSpace(s.ID), []byte("null")) {
+		return s.ID
+	}
+	return s.Session
+}
+
+func (s sanchoSession) displayName() string {
+	for _, candidate := range []string{s.Name, s.Host, s.Server} {
+		if candidate != "" {
+			return candidate
+		}
+	}
+	return ""
 }
 
 func (b *Backend) Exec(ctx context.Context, backendTargetID string, req backend.ExecRequest) (backend.ExecResult, error) {

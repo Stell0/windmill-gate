@@ -48,6 +48,45 @@ func TestListTargetsParsesSessionsForHumanSelection(t *testing.T) {
 	}
 }
 
+func TestListTargetsParsesSanchoObjectStream(t *testing.T) {
+	runner := &fakeRunner{stdout: `
+{
+  "session": "private-session-a",
+  "server": "customer-a",
+  "vpn": "172.29.0.1"
+}
+{
+  "session": "private-session-b",
+  "server": "customer-b",
+  "vpn": "172.29.0.2"
+}
+`}
+	b, err := New(Config{Bastion: "bastion.example", runner: runner})
+	if err != nil {
+		t.Fatal(err)
+	}
+	targets, err := b.ListTargets(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(targets) != 2 {
+		t.Fatalf("target count = %d, want 2", len(targets))
+	}
+	if targets[0].ID != "private-session-a" || targets[0].DisplayName != "customer-a" {
+		t.Fatalf("unexpected first target: %#v", targets[0])
+	}
+	if targets[1].ID != "private-session-b" || targets[1].DisplayName != "customer-b" {
+		t.Fatalf("unexpected second target: %#v", targets[1])
+	}
+}
+
+func TestParseSessionsRejectsMixedArrayAndStream(t *testing.T) {
+	_, err := parseSessions([]byte(`[{"id":"private-a"}]{"id":"private-b"}`))
+	if err == nil || !strings.Contains(err.Error(), "after session array") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestExecQuotesExactPayloadAndRedactsBackendID(t *testing.T) {
 	const backendID = "4837291"
 	const payload = "printf '%s\\n' \"a b\""

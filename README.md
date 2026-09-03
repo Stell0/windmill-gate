@@ -43,7 +43,7 @@ sancho session forward <session-id> \
   --remote-host 127.0.0.1 --remote-port <port>
 ```
 
-`session list --json` must return an array containing `id` plus `name` or `host`. `session exec` must preserve the final command argument as exact bytes and return the remote exit status. `session forward` must remain attached while the target-scoped forward is active. These are external Sancho capabilities; Gate deliberately does not reproduce Windmill connectivity. Backend IDs used in these calls are redacted from agent-visible output and errors.
+`session list --json` may return either an array containing `id` plus `name` or `host`, or a stream of JSON objects containing `session` plus `server`. `session exec` must preserve the final command argument as exact bytes and return the remote exit status. `session forward` must remain attached while the target-scoped forward is active. These are external Sancho capabilities; Gate deliberately does not reproduce Windmill connectivity. Backend IDs used in these calls are redacted from agent-visible output and errors.
 
 ### Local quick start
 
