@@ -612,6 +612,10 @@ Teaches the agent to:
 - inspect command output before proposing the next action;
 - never ask for or attempt to discover Windmill session IDs.
 
+It also includes a Gate-compatible NethServer diagnostic reference covering
+cluster inventory, host and rootless systemd state, Podman, bounded journal
+fallbacks, routes, Redis inventory, networking, and exact NethVoice checks.
+
 ### `gate-port-forward`
 
 Teaches the agent to:

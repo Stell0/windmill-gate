@@ -5,7 +5,26 @@ description: Diagnose an operator-selected production target through Gate's non-
 
 # Gate Remote Shell
 
-Use `gate-sh -c '<exact command>'` for production execution. For a hosted Gate, add the configured `--ssh <gate-host>` option. Assume the operator has already attached this agent identity to the intended target.
+Use Gate for every command that must run on the production target. Assume the
+operator has already selected that target and attached this agent identity.
+
+For a repository build, run:
+
+```bash
+bin/gate-sh --agent <agent-identity> -c '<exact command>'
+```
+
+Use `gate-sh` instead of `bin/gate-sh` when Gate is installed on `PATH`. For a
+hosted Gate, add the configured restricted transport before `-c`:
+
+```bash
+gate-sh --ssh <gate-host> --agent <agent-identity> -c '<exact command>'
+```
+
+Use the identity supplied by the harness or operator. Do not guess another
+identity if attachment fails.
+
+## Execution contract
 
 Keep the command boundary observable:
 
@@ -14,9 +33,21 @@ Keep the command boundary observable:
 - Prefer a standalone machine-readable command over a remote presentation pipeline. For example, submit `api-cli run list-installed-modules` and process its JSON output locally instead of appending `| jq`.
 - Use concrete module, unit, and container names in each command. Shell assignments do not persist between `gate-sh` executions.
 - Wait for stdout, stderr, and exit status before choosing a dependent command.
+- Treat a command that remains running as potentially waiting for operator approval. Do not submit a duplicate while waiting.
 - Treat `ASK` as expected: wait for the operator instead of changing, splitting, encoding, or rerouting the command to evade review.
 - Do not invoke interactive programs, shells, pagers, editors, REPLs, or remote-login tools.
 - Do not ask for, enumerate, infer, print, or persist Windmill session IDs or backend transport details.
 - Do not use direct SSH as a production-target bypass. SSH is permitted only as Gate's configured client transport.
 
-When a command fails, report the Gate-visible error and propose the smallest useful follow-up. Never assume a target change; only the operator can attach a new target.
+Gate returns remote stdout and stderr on their corresponding local streams and
+preserves the remote exit status after execution. Exit status `1` accompanied by
+a `gate-sh:` message is a Gate transport/protocol failure; exit status `2` is a
+client usage error. Otherwise, interpret a non-zero status as the remote
+command's result. Report the visible error and propose the smallest useful
+follow-up. Never assume a target change; only the operator can attach a new
+target.
+
+For NethServer 8 administration and troubleshooting, read
+[NethServer diagnostics](references/nethserver-diagnostics.md) before issuing
+commands. It provides a Gate-compatible diagnostic ladder and explains which
+results require a dependent follow-up.
