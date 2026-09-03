@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -12,23 +13,43 @@ import (
 )
 
 type fakeRunner struct {
+	stdout    string
+	stderr    string
+	err       error
+	runs      []fakeRun
+	runIndex  int
+	name      string
+	args      []string
+	startArgs []string
+}
+
+type fakeRun struct {
 	stdout string
 	stderr string
 	err    error
-	name   string
-	args   []string
 }
 
 func (r *fakeRunner) Run(_ context.Context, name string, args []string, _ io.Reader, stdout, stderr io.Writer) error {
 	r.name, r.args = name, append([]string{}, args...)
-	_, _ = io.WriteString(stdout, r.stdout)
-	_, _ = io.WriteString(stderr, r.stderr)
-	return r.err
+	result := fakeRun{stdout: r.stdout, stderr: r.stderr, err: r.err}
+	if r.runIndex < len(r.runs) {
+		result = r.runs[r.runIndex]
+		r.runIndex++
+	}
+	_, _ = io.WriteString(stdout, result.stdout)
+	_, _ = io.WriteString(stderr, result.stderr)
+	return result.err
 }
 
-func (r *fakeRunner) Start(context.Context, string, []string, io.Reader, io.Writer, io.Writer) (process, error) {
-	return nil, errors.New("not implemented")
+func (r *fakeRunner) Start(_ context.Context, _ string, args []string, _ io.Reader, _ io.Writer, _ io.Writer) (process, error) {
+	r.startArgs = append([]string{}, args...)
+	return fakeProcess{}, nil
 }
+
+type fakeProcess struct{}
+
+func (fakeProcess) Wait() error { return nil }
+func (fakeProcess) Kill() error { return nil }
 
 func TestListTargetsParsesSessionsForHumanSelection(t *testing.T) {
 	runner := &fakeRunner{stdout: `[{"id":4837291,"name":"customer-a"},{"id":"abc","host":"customer-b"}]`}
@@ -112,6 +133,153 @@ func TestExecQuotesExactPayloadAndRedactsBackendID(t *testing.T) {
 	remote := runner.args[len(runner.args)-1]
 	if !strings.Contains(remote, shellQuote(payload)) {
 		t.Fatalf("exact payload was not transported as one quoted argument: %s", remote)
+	}
+}
+
+func TestLegacyExecUsesSanchoConnectionMetadataAndPreservesExitCode(t *testing.T) {
+	const (
+		backendID = "private-session-a"
+		vpn       = "172.29.6.206"
+		payload   = "printf '%s\\n' \"a b\"; exit 7"
+	)
+	listing := `{"session":"private-session-a","server":"customer-a","vpn":"172.29.6.206"}`
+	runner := &fakeRunner{runs: []fakeRun{
+		{stdout: listing},
+		{stdout: listing},
+		{stdout: "connected to " + vpn + " for " + backendID, stderr: "warning from " + vpn, err: exec.Command("sh", "-c", "exit 7").Run()},
+	}}
+	b, err := New(Config{Bastion: "bastion.example", TargetSSHPort: 981, runner: runner})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.ListTargets(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	result, err := b.Exec(context.Background(), backendID, backend.ExecRequest{
+		Payload: []byte(payload), Stdout: &stdout, Stderr: &stderr,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ExitCode != 7 {
+		t.Fatalf("exit code = %d, want 7", result.ExitCode)
+	}
+	remote := runner.args[len(runner.args)-1]
+	if strings.Contains(remote, backendID) {
+		t.Fatalf("private session ID was sent outside session discovery: %s", remote)
+	}
+	if !strings.Contains(remote, shellQuote(remoteCommand("sh", "-lc", payload))) {
+		t.Fatalf("approved payload was not preserved as the sh -lc argument: %s", remote)
+	}
+	if !strings.Contains(remote, shellQuote("root@"+vpn)) || !strings.Contains(remote, shellQuote("981")) {
+		t.Fatalf("legacy connection metadata missing from remote command: %s", remote)
+	}
+	combined := stdout.String() + stderr.String()
+	if strings.Contains(combined, backendID) || strings.Contains(combined, vpn) {
+		t.Fatalf("private connection data leaked: %q", combined)
+	}
+}
+
+func TestLegacyExecRevalidatesSelectedSession(t *testing.T) {
+	runner := &fakeRunner{runs: []fakeRun{
+		{stdout: `{"session":"private-session-a","server":"customer-a","vpn":"172.29.6.206"}`},
+		{stdout: `{"session":"private-session-b","server":"customer-b","vpn":"172.29.6.207"}`},
+	}}
+	b, err := New(Config{Bastion: "bastion.example", runner: runner})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.ListTargets(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	_, err = b.Exec(context.Background(), "private-session-a", backend.ExecRequest{Payload: []byte("uptime")})
+	if err == nil || !strings.Contains(err.Error(), "no longer available") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if runner.runIndex != 2 {
+		t.Fatalf("runner calls = %d, want discovery plus refresh only", runner.runIndex)
+	}
+}
+
+func TestLegacyForwardUsesSelectedTargetLoopback(t *testing.T) {
+	const backendID = "private-session-a"
+	runner := &fakeRunner{stdout: `{"session":"private-session-a","server":"customer-a","vpn":"172.29.6.206"}`}
+	b, err := New(Config{Bastion: "bastion.example", TargetSSHPort: 981, runner: runner})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.ListTargets(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	forward, err := b.OpenForward(context.Background(), backendID, backend.ForwardRequest{
+		RemoteHost: "127.0.0.1", RemotePort: 443, LocalPort: 18443,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := forward.Close(); err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(runner.startArgs, " ")
+	if strings.Contains(joined, backendID) {
+		t.Fatalf("private session ID was sent in legacy forward: %s", joined)
+	}
+	for _, expected := range []string{
+		"127.0.0.1:18443:127.0.0.1:18443",
+		"127.0.0.1:18443:127.0.0.1:443",
+		"root@172.29.6.206",
+		"981",
+	} {
+		if !strings.Contains(joined, expected) {
+			t.Fatalf("legacy forward missing %q: %s", expected, joined)
+		}
+	}
+}
+
+func TestModernForwardBridgesToSanchoListenerPort(t *testing.T) {
+	const backendID = "private-session-a"
+	runner := &fakeRunner{}
+	b, err := New(Config{Bastion: "bastion.example", runner: runner})
+	if err != nil {
+		t.Fatal(err)
+	}
+	forward, err := b.OpenForward(context.Background(), backendID, backend.ForwardRequest{
+		RemoteHost: "127.0.0.1", RemotePort: 443, LocalPort: 18443,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := forward.Close(); err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(runner.startArgs, " ")
+	if !strings.Contains(joined, "127.0.0.1:18443:127.0.0.1:18443") {
+		t.Fatalf("outer SSH does not connect to the Sancho listener: %s", joined)
+	}
+	remote := runner.startArgs[len(runner.startArgs)-1]
+	for _, expected := range []string{backendID, "--listen-port", "18443", "--remote-port", "443"} {
+		if !strings.Contains(remote, shellQuote(expected)) {
+			t.Fatalf("Sancho forward missing %q: %s", expected, remote)
+		}
+	}
+}
+
+func TestLegacyConnectionRejectsNonPrivateAddress(t *testing.T) {
+	runner := &fakeRunner{stdout: `{"session":"private-session-a","server":"customer-a","vpn":"203.0.113.10"}`}
+	b, err := New(Config{Bastion: "bastion.example", runner: runner})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = b.ListTargets(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "private non-loopback IP") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestTargetSSHPortValidation(t *testing.T) {
+	if _, err := New(Config{Bastion: "bastion.example", TargetSSHPort: 65536}); err == nil {
+		t.Fatal("expected invalid target SSH port to fail")
 	}
 }
 

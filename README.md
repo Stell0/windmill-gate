@@ -45,6 +45,8 @@ sancho session forward <session-id> \
 
 `session list --json` may return either an array containing `id` plus `name` or `host`, or a stream of JSON objects containing `session` plus `server`. `session exec` must preserve the final command argument as exact bytes and return the remote exit status. `session forward` must remain attached while the target-scoped forward is active. These are external Sancho capabilities; Gate deliberately does not reproduce Windmill connectivity. Backend IDs used in these calls are redacted from agent-visible output and errors.
 
+Legacy Sancho 0.0.1 installations expose `session`, `server`, and `vpn` but only provide an interactive `session ssh` helper that discards the remote exit status. For this format, Gate revalidates the selected session immediately before use, then uses the Sancho-reported private VPN address to run a constrained nested SSH command through the Bastion. The approved payload remains the exact `sh -lc` argument, and the nested SSH status is returned to the agent. The target SSH port defaults to `981` and can be changed with `--target-ssh-port`. Neither the private session ID nor VPN address is returned to agents. Legacy forwards use the same selected target metadata and still terminate at target loopback.
+
 ### Local quick start
 
 Start Gate with the interactive operator console. The target selector prints display names and numbers, never Windmill IDs:

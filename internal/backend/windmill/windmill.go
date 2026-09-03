@@ -8,8 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os/exec"
+	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/nethserver/gate/internal/backend"
 )
@@ -47,16 +50,27 @@ func (p commandProcess) Wait() error { return p.cmd.Wait() }
 func (p commandProcess) Kill() error { return p.cmd.Process.Kill() }
 
 type Config struct {
-	Bastion string
-	SSHPath string
-	SSHArgs []string
-	Sancho  string
-	runner  commandRunner
+	Bastion       string
+	SSHPath       string
+	SSHArgs       []string
+	Sancho        string
+	TargetSSHPort int
+	runner        commandRunner
 }
 
 type Backend struct {
 	config Config
+
+	mu          sync.RWMutex
+	connections map[string]targetConnection
 }
+
+type targetConnection struct {
+	host string
+	port int
+}
+
+const DefaultTargetSSHPort = 981
 
 func New(config Config) (*Backend, error) {
 	if strings.TrimSpace(config.Bastion) == "" {
@@ -68,10 +82,16 @@ func New(config Config) (*Backend, error) {
 	if config.Sancho == "" {
 		config.Sancho = "sancho"
 	}
+	if config.TargetSSHPort == 0 {
+		config.TargetSSHPort = DefaultTargetSSHPort
+	}
+	if config.TargetSSHPort < 1 || config.TargetSSHPort > 65535 {
+		return nil, errors.New("Windmill target SSH port must be between 1 and 65535")
+	}
 	if config.runner == nil {
 		config.runner = execRunner{}
 	}
-	return &Backend{config: config}, nil
+	return &Backend{config: config, connections: make(map[string]targetConnection)}, nil
 }
 
 func (b *Backend) Name() string { return "windmill" }
@@ -82,6 +102,7 @@ type sanchoSession struct {
 	Name    string          `json:"name"`
 	Host    string          `json:"host"`
 	Server  string          `json:"server"`
+	VPN     string          `json:"vpn"`
 	Status  string          `json:"status"`
 }
 
@@ -102,10 +123,18 @@ func (b *Backend) ListTargets(ctx context.Context) ([]backend.Target, error) {
 		return nil, fmt.Errorf("parse Sancho session list: %w", err)
 	}
 	targets := make([]backend.Target, 0, len(sessions))
+	connections := make(map[string]targetConnection)
 	for _, session := range sessions {
 		id, err := rawID(session.backendID())
 		if err != nil {
 			return nil, fmt.Errorf("parse Sancho session: %w", err)
+		}
+		if session.VPN != "" {
+			connection, err := legacyConnection(session.VPN, b.config.TargetSSHPort)
+			if err != nil {
+				return nil, fmt.Errorf("parse Sancho session connection: %w", err)
+			}
+			connections[id] = connection
 		}
 		display := session.displayName()
 		if display == "" {
@@ -113,6 +142,9 @@ func (b *Backend) ListTargets(ctx context.Context) ([]backend.Target, error) {
 		}
 		targets = append(targets, backend.Target{ID: id, DisplayName: display})
 	}
+	b.mu.Lock()
+	b.connections = connections
+	b.mu.Unlock()
 	return targets, nil
 }
 
@@ -176,11 +208,46 @@ func (s sanchoSession) displayName() string {
 	return ""
 }
 
+func legacyConnection(host string, port int) (targetConnection, error) {
+	address := net.ParseIP(host)
+	if address == nil || !address.IsPrivate() || address.IsLoopback() {
+		return targetConnection{}, errors.New("legacy target address must be a private non-loopback IP")
+	}
+	return targetConnection{host: address.String(), port: port}, nil
+}
+
+func (b *Backend) connection(backendTargetID string) (targetConnection, bool) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	connection, ok := b.connections[backendTargetID]
+	return connection, ok
+}
+
+func (b *Backend) refreshConnection(ctx context.Context, backendTargetID string) (targetConnection, error) {
+	if _, err := b.ListTargets(ctx); err != nil {
+		return targetConnection{}, fmt.Errorf("refresh selected Windmill session: %w", err)
+	}
+	connection, ok := b.connection(backendTargetID)
+	if !ok {
+		return targetConnection{}, errors.New("selected Windmill session is no longer available")
+	}
+	return connection, nil
+}
+
 func (b *Backend) Exec(ctx context.Context, backendTargetID string, req backend.ExecRequest) (backend.ExecResult, error) {
-	stdout := newRedactingWriter(req.Stdout, backendTargetID)
-	stderr := newRedactingWriter(req.Stderr, backendTargetID)
-	defer stdout.Close()
-	defer stderr.Close()
+	if _, ok := b.connection(backendTargetID); ok {
+		connection, err := b.refreshConnection(ctx, backendTargetID)
+		if err != nil {
+			return backend.ExecResult{}, err
+		}
+		return b.execLegacy(ctx, backendTargetID, connection, req)
+	}
+	return b.execSancho(ctx, backendTargetID, req)
+}
+
+func (b *Backend) execSancho(ctx context.Context, backendTargetID string, req backend.ExecRequest) (backend.ExecResult, error) {
+	stdout, stderr, closeWriters := redactedStreams(req, backendTargetID)
+	defer closeWriters()
 
 	args := append(append([]string{}, b.config.SSHArgs...), b.config.Bastion,
 		remoteCommand(b.config.Sancho, "session", "exec", backendTargetID, "--", string(req.Payload)))
@@ -195,21 +262,105 @@ func (b *Backend) Exec(ctx context.Context, backendTargetID string, req backend.
 	return backend.ExecResult{}, fmt.Errorf("execute remote command: %s", redact(err.Error(), backendTargetID))
 }
 
+func (b *Backend) execLegacy(ctx context.Context, backendTargetID string, connection targetConnection, req backend.ExecRequest) (backend.ExecResult, error) {
+	stdout, stderr, closeWriters := redactedStreams(req, backendTargetID, connection.host)
+	defer closeWriters()
+
+	targetCommand := remoteCommand("sh", "-lc", string(req.Payload))
+	remote := legacySSHCommand(connection, targetCommand, false, "")
+	args := append(append([]string{}, b.config.SSHArgs...), b.config.Bastion, remote)
+	err := b.config.runner.Run(ctx, b.config.SSHPath, args, nil, stdout, stderr)
+	if err == nil {
+		return backend.ExecResult{ExitCode: 0}, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return backend.ExecResult{ExitCode: exitErr.ExitCode()}, nil
+	}
+	return backend.ExecResult{}, fmt.Errorf("execute remote command: %s", redactMany(err.Error(), backendTargetID, connection.host))
+}
+
+func redactedStreams(req backend.ExecRequest, secrets ...string) (io.Writer, io.Writer, func()) {
+	stdout, stdoutWriters := redactedStream(req.Stdout, secrets...)
+	stderr, stderrWriters := redactedStream(req.Stderr, secrets...)
+	return stdout, stderr, func() {
+		closeRedactors(stdoutWriters)
+		closeRedactors(stderrWriters)
+	}
+}
+
+func redactedStream(destination io.Writer, secrets ...string) (io.Writer, []*redactingWriter) {
+	current := destination
+	writers := make([]*redactingWriter, 0, len(secrets))
+	for index := len(secrets) - 1; index >= 0; index-- {
+		writer := newRedactingWriter(current, secrets[index])
+		current = writer
+		writers = append(writers, writer)
+	}
+	return current, writers
+}
+
+func closeRedactors(writers []*redactingWriter) {
+	for index := len(writers) - 1; index >= 0; index-- {
+		_ = writers[index].Close()
+	}
+}
+
+func redactMany(value string, secrets ...string) string {
+	for _, secret := range secrets {
+		value = redact(value, secret)
+	}
+	return value
+}
+
+func legacySSHCommand(connection targetConnection, targetCommand string, forwardOnly bool, forwardSpec string) string {
+	args := []string{
+		"ssh",
+		"-o", "BatchMode=yes",
+		"-o", "UserKnownHostsFile=/dev/null",
+		"-o", "StrictHostKeyChecking=no",
+		"-p", strconv.Itoa(connection.port),
+	}
+	if forwardOnly {
+		args = append(args, "-o", "ExitOnForwardFailure=yes", "-N", "-L", forwardSpec)
+	}
+	destination := "root@" + connection.host
+	if strings.Contains(connection.host, ":") {
+		destination = "root@[" + connection.host + "]"
+	}
+	args = append(args, destination)
+	if targetCommand != "" {
+		args = append(args, targetCommand)
+	}
+	return remoteCommand(args...)
+}
+
 func (b *Backend) OpenForward(ctx context.Context, backendTargetID string, req backend.ForwardRequest) (backend.Forward, error) {
 	if req.RemoteHost != "127.0.0.1" && req.RemoteHost != "localhost" {
 		return nil, errors.New("Windmill forwards are restricted to the selected target loopback")
 	}
-	spec := fmt.Sprintf("127.0.0.1:%d:%s:%d", req.LocalPort, req.RemoteHost, req.RemotePort)
+	targetSpec := fmt.Sprintf("127.0.0.1:%d:%s:%d", req.LocalPort, req.RemoteHost, req.RemotePort)
+	outerSpec := fmt.Sprintf("127.0.0.1:%d:127.0.0.1:%d", req.LocalPort, req.LocalPort)
+	remote := remoteCommand(
+		b.config.Sancho, "session", "forward", backendTargetID,
+		"--listen-host", "127.0.0.1", "--listen-port", fmt.Sprint(req.LocalPort),
+		"--remote-host", req.RemoteHost, "--remote-port", fmt.Sprint(req.RemotePort),
+	)
+	privateValues := []string{backendTargetID}
+	if _, ok := b.connection(backendTargetID); ok {
+		connection, err := b.refreshConnection(ctx, backendTargetID)
+		if err != nil {
+			return nil, err
+		}
+		remote = legacySSHCommand(connection, "", true, targetSpec)
+		privateValues = append(privateValues, connection.host)
+	}
 	args := append(append([]string{}, b.config.SSHArgs...),
-		"-o", "ExitOnForwardFailure=yes", "-L", spec, b.config.Bastion,
-		remoteCommand(
-			b.config.Sancho, "session", "forward", backendTargetID,
-			"--listen-host", "127.0.0.1", "--listen-port", fmt.Sprint(req.LocalPort),
-			"--remote-host", req.RemoteHost, "--remote-port", fmt.Sprint(req.RemotePort),
-		))
+		"-o", "ExitOnForwardFailure=yes", "-L", outerSpec, b.config.Bastion,
+		remote)
 	proc, err := b.config.runner.Start(ctx, b.config.SSHPath, args, nil, io.Discard, io.Discard)
 	if err != nil {
-		return nil, fmt.Errorf("open remote forward: %s", redact(err.Error(), backendTargetID))
+		return nil, fmt.Errorf("open remote forward: %s", redactMany(err.Error(), privateValues...))
 	}
 	return &runningForward{process: proc}, nil
 }

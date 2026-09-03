@@ -89,6 +89,7 @@ func runServer(args []string, withUI bool, stdin io.Reader, stdout, stderr io.Wr
 	flags.SetOutput(stderr)
 	var socketPath, sshSocketPath, databasePath, policyPath, bastion, sancho, selector, agentID, operator, hostsPath string
 	var outputLimit int64
+	var targetSSHPort int
 	var sshArgs repeatedFlag
 	flags.StringVar(&socketPath, "socket", config.SocketPath(), "Unix socket path")
 	flags.StringVar(&sshSocketPath, "ssh-socket", remoteSocketPath(config.SocketPath()), "trusted SSH bridge socket path")
@@ -101,6 +102,7 @@ func runServer(args []string, withUI bool, stdin io.Reader, stdout, stderr io.Wr
 	flags.StringVar(&operator, "operator", envOr("GATE_OPERATOR", "operator"), "operator audit identity")
 	flags.StringVar(&hostsPath, "hosts-file", envOr("GATE_HOSTS_FILE", "/etc/hosts"), "Gate-managed hosts file")
 	flags.Int64Var(&outputLimit, "output-limit", gatecore.DefaultOutputLimit, "maximum output bytes per command")
+	flags.IntVar(&targetSSHPort, "target-ssh-port", windmill.DefaultTargetSSHPort, "legacy Windmill target SSH port")
 	flags.Var(&sshArgs, "ssh-arg", "additional SSH argument (repeatable)")
 	if err := flags.Parse(args); err != nil {
 		return 2
@@ -128,7 +130,9 @@ func runServer(args []string, withUI bool, stdin io.Reader, stdout, stderr io.Wr
 		return 1
 	}
 	defer store.Close()
-	implementation, err := windmill.New(windmill.Config{Bastion: bastion, Sancho: sancho, SSHArgs: sshArgs})
+	implementation, err := windmill.New(windmill.Config{
+		Bastion: bastion, Sancho: sancho, SSHArgs: sshArgs, TargetSSHPort: targetSSHPort,
+	})
 	if err != nil {
 		fmt.Fprintf(stderr, "gate: %v\n", err)
 		return 1

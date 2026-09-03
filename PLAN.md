@@ -17,7 +17,7 @@ Versions v0.1 through v0.3 are implemented. The code follows the implementation 
 - loopback-only forwards and exact-marker-owned hostname aliases;
 - harness-neutral Gate skills and a tested policy-analysis/PR workflow that stops before merge or deployment.
 
-The Windmill adapter requires the Sancho command primitives documented in `README.md`. They are an external transport dependency, not reimplemented in Gate. Items under “Later ideas” remain intentionally deferred.
+The Windmill adapter prefers the Sancho command primitives documented in `README.md`. It also supports the deployed Sancho 0.0.1 object-stream format with a constrained, target-scoped nested SSH compatibility path through the Bastion. Items under “Later ideas” remain intentionally deferred.
 
 ## Design constraints
 
