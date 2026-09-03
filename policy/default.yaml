@@ -6,53 +6,89 @@
 # bounded diagnostics; optional presentation pipelines from the source skill
 # remain ASK.
 allow:
+  # Basic host identity and capacity checks; optional arguments remain explicit.
   - '^uname(?: -a)?$'
   - '^uptime$'
   - '^df(?: -h)?$'
   - '^free(?: -[hm])?$'
   - '^hostnamectl --static$'
-  - '^id$'
+  - '^id(?: -u [a-zA-Z0-9][a-zA-Z0-9_.-]*)?$'
+
+  # Read fixed, non-secret operating-system and kernel accounting files.
   - '^cat /etc/os-release$'
   - '^cat /proc/sys/fs/file-nr$'
   - '^findmnt -n -o TARGET --target /home$'
-  - '^systemctl status [a-zA-Z0-9][a-zA-Z0-9_.@-]*(?: --no-pager)?$'
+
+  # Inspect host systemd state. Unit selectors may include a shell brace list,
+  # but commands that change unit state are never part of these rules.
+  - '^systemctl status [a-zA-Z0-9][a-zA-Z0-9_.@{},-]*(?: --no-pager)?$'
+  - '^systemctl show [a-zA-Z0-9][a-zA-Z0-9_.@-]* --property=[a-zA-Z][a-zA-Z0-9]*(?:,[a-zA-Z][a-zA-Z0-9]*)* --no-pager$'
+  - '^systemctl cat [a-zA-Z0-9][a-zA-Z0-9_.@-]* --no-pager$'
   - '^systemctl --no-pager --type=service --state=failed$'
   - '^systemctl list-units --all ''[a-zA-Z0-9][a-zA-Z0-9_.@-]*\*'' --no-pager$'
+
+  # Read bounded host journal slices. UID selection is useful when a rootless
+  # module user cannot read its own journal through runagent.
   - '^journalctl -u [a-zA-Z0-9][a-zA-Z0-9_.@-]*(?: --no-pager)? -n (?:[1-9][0-9]{0,2}|1000)$'
   - '^journalctl -b --no-pager -n (?:[1-9][0-9]{0,2}|1000)$'
   - '^journalctl -p err -b --no-pager -n (?:[1-9][0-9]{0,2}|1000)$'
+  - '^journalctl _UID=[1-9][0-9]{0,9}(?: -p (?:emerg|alert|crit|err|warning|notice|info|debug|[0-7]))? --no-pager -n (?:[1-9][0-9]{0,2}|1000)$'
+
+  # Inspect host containers and storage without following logs or mutating
+  # container state.
   - '^podman ps(?: -a)?$'
   - '^podman ps --format ''\{\{\.Names\}\}\\t\{\{\.Status\}\}''$'
   - '^podman logs --tail (?:[1-9][0-9]{0,2}|1000) [a-zA-Z0-9][a-zA-Z0-9_.-]*$'
   - '^podman system info --format=''\{\{\.Store\.VolumePath\}\}''$'
   - '^podman volume ls$'
+
+  # Inspect host networking and firewalld configuration; no reload or edits.
   - '^ip (?:addr|route|link)(?: show)?$'
   - '^firewall-cmd --(?:get-active-zones|list-all-zones)$'
-  - '^logcli labels module_id -q$'
+  - '^logcli labels(?: [a-zA-Z_][a-zA-Z0-9_]*)? -q$'
+
+  # Read cluster and module status through documented API actions. Configuration
+  # and write actions intentionally remain subject to operator review.
   - '^api-cli --help$'
   - '^api-cli run (?:list-actions|get-cluster-status|list-installed-modules)$'
   - '^api-cli run module/[a-zA-Z0-9][a-zA-Z0-9_.-]*/(?:list-actions|get-status)$'
   - '^api-cli run list-routes --agent module/[a-zA-Z0-9][a-zA-Z0-9_.-]*(?: --data ''\{"expand_list":true\}'')?$'
   - '^api-cli run get-route --agent module/[a-zA-Z0-9][a-zA-Z0-9_.-]* --data ''\{"instance":"[a-zA-Z0-9][a-zA-Z0-9_.-]*"\}''$'
   - '^api-cli run list-certificates --agent module/[a-zA-Z0-9][a-zA-Z0-9_.-]*$'
+
+  # Inspect per-module user services. Module and unit names are generalized so
+  # the same diagnostics work for every installed instance.
   - '^runagent -m [a-zA-Z0-9][a-zA-Z0-9_.-]* systemctl --user list-units --all --no-pager$'
-  - '^runagent -m [a-zA-Z0-9][a-zA-Z0-9_.-]* systemctl --user status [a-zA-Z0-9][a-zA-Z0-9_.@-]* --no-pager$'
+  - '^runagent -m [a-zA-Z0-9][a-zA-Z0-9_.-]* systemctl --user status [a-zA-Z0-9][a-zA-Z0-9_.@{},-]* --no-pager$'
+  - '^runagent -m [a-zA-Z0-9][a-zA-Z0-9_.-]* systemctl --user show [a-zA-Z0-9][a-zA-Z0-9_.@-]* --property=[a-zA-Z][a-zA-Z0-9]*(?:,[a-zA-Z][a-zA-Z0-9]*)* --no-pager$'
   - '^runagent -m [a-zA-Z0-9][a-zA-Z0-9_.-]* systemctl --user --failed --no-legend --no-pager$'
-  - '^runagent -m [a-zA-Z0-9][a-zA-Z0-9_.-]* journalctl --user(?: -u [a-zA-Z0-9][a-zA-Z0-9_.@-]*)? --no-pager -n (?:[1-9][0-9]{0,2}|1000)$'
+
+  # Read bounded, non-following per-module journal slices.
+  - '^runagent -m [a-zA-Z0-9][a-zA-Z0-9_.-]* journalctl --user(?: -u [a-zA-Z0-9][a-zA-Z0-9_.@{},-]*)? --no-pager -n (?:[1-9][0-9]{0,2}|1000)$'
+
+  # Inspect per-module containers. Log options are useful but deliberately omit
+  # --follow/-f; timestamps and bounded/since/until selectors are read-only.
   - '^runagent -m [a-zA-Z0-9][a-zA-Z0-9_.-]* podman ps -a$'
   - '^runagent -m [a-zA-Z0-9][a-zA-Z0-9_.-]* podman ps -a --format ''\{\{\.Names\}\} \[Status:\{\{\.Status\}\}\] \[Restarts:\{\{\.Restarts\}\}\]''$'
-  - '^runagent -m [a-zA-Z0-9][a-zA-Z0-9_.-]* podman logs --tail (?:[1-9][0-9]{0,2}|1000) [a-zA-Z0-9][a-zA-Z0-9_.-]*$'
+  - '^runagent -m [a-zA-Z0-9][a-zA-Z0-9_.-]* podman logs(?: --tail (?:[1-9][0-9]{0,5}|all))?(?: --since [a-zA-Z0-9][a-zA-Z0-9:TZ+_.-]*)?(?: --until [a-zA-Z0-9][a-zA-Z0-9:TZ+_.-]*)?(?: --timestamps)? [a-zA-Z0-9][a-zA-Z0-9_.-]*$'
   - '^runagent -m [a-zA-Z0-9][a-zA-Z0-9_.-]* podman system info --format=''\{\{\.Store\.VolumePath\}\}''$'
   - '^runagent -m [a-zA-Z0-9][a-zA-Z0-9_.-]* podman volume ls$'
+
+  # Read known Redis inventory keys and safely shaped module key families. Only
+  # read verbs are admitted; writes, publish, and unbounded KEYS remain outside.
   - '^redis-cli --scan --pattern ''module/\*/srv/\*/\*''$'
   - '^redis-cli --scan --pattern ''module/[a-zA-Z0-9][a-zA-Z0-9_.-]*/\*''$'
   - '^redis-cli --scan --pattern ''module/\*/environment''$'
   - '^redis-cli --raw get cluster/default_instance/traefik$'
-  - '^redis-cli --raw HGETALL cluster/module_node$'
+  - '^redis-cli(?: --raw)? HGETALL [a-zA-Z0-9][a-zA-Z0-9_./:@-]*$'
   - '^redis-cli get module/[a-zA-Z0-9][a-zA-Z0-9_.-]*/ui_name$'
   - '^redis-cli --raw HGET (?:"module/[a-zA-Z0-9][a-zA-Z0-9_.-]*/environment"|module/[a-zA-Z0-9][a-zA-Z0-9_.-]*/environment) IMAGE_URL$'
+
+  # NethVoice checks execute only exact read-only commands inside freepbx.
   - '^runagent -m [a-zA-Z0-9][a-zA-Z0-9_.-]* podman exec freepbx (?:cat /etc/resolv\.conf|pgrep asterisk)$'
   - '^runagent -m [a-zA-Z0-9][a-zA-Z0-9_.-]* podman exec freepbx asterisk -rx ''(?:pjsip show contacts|pjsip show transports|database show AMPUSER|database show CF|queue show)''$'
+
+  # Gate-managed web forwards remain target-scoped and loopback-only.
   - '^gate forward add --remote-port (?:80|443)$'
 
 deny:

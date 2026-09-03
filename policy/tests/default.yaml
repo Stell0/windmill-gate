@@ -19,6 +19,8 @@ allow:
     expect: ALLOW
   - command: "id"
     expect: ALLOW
+  - command: "id -u hermes-agent9"
+    expect: ALLOW
   - command: "cat /etc/os-release"
     expect: ALLOW
   - command: "cat /proc/sys/fs/file-nr"
@@ -29,11 +31,19 @@ allow:
     expect: ALLOW
   - command: "systemctl --no-pager --type=service --state=failed"
     expect: ALLOW
+  - command: "systemctl show promtail.service --property=LoadState,ActiveState,SubState,Result,ExecMainStatus,ExecStart,FragmentPath --no-pager"
+    expect: ALLOW
+  - command: "systemctl cat promtail.service --no-pager"
+    expect: ALLOW
   - command: "systemctl list-units --all 'nethvoice1*' --no-pager"
     expect: ALLOW
   - command: "journalctl -b --no-pager -n 200"
     expect: ALLOW
   - command: "journalctl -p err -b --no-pager -n 1000"
+    expect: ALLOW
+  - command: "journalctl _UID=1014 --no-pager -n 200"
+    expect: ALLOW
+  - command: "journalctl _UID=1019 -p err --no-pager -n 100"
     expect: ALLOW
   - command: "journalctl -u api-server --no-pager -n 200"
     expect: ALLOW
@@ -48,6 +58,8 @@ allow:
   - command: "firewall-cmd --list-all-zones"
     expect: ALLOW
   - command: "logcli labels module_id -q"
+    expect: ALLOW
+  - command: "logcli labels -q"
     expect: ALLOW
   - command: "api-cli --help"
     expect: ALLOW
@@ -75,15 +87,25 @@ allow:
     expect: ALLOW
   - command: "runagent -m mail1 systemctl --user --failed --no-legend --no-pager"
     expect: ALLOW
+  - command: "runagent -m hermes-agent9 systemctl --user status hermes@{1,3,4}.service --no-pager"
+    expect: ALLOW
+  - command: "runagent -m nethvoice42 systemctl --user show phonebook.service --property=ActiveState,SubState,Result,NRestarts,ExecMainStatus,ActiveEnterTimestamp --no-pager"
+    expect: ALLOW
   - command: "runagent -m mail1 journalctl --user -u postfix.service --no-pager -n 200"
     expect: ALLOW
   - command: "runagent -m mail1 journalctl --user --no-pager -n 200"
+    expect: ALLOW
+  - command: "runagent -m hermes-agent9 journalctl --user -u hermes@{1,3,4}.service --no-pager -n 100"
     expect: ALLOW
   - command: "runagent -m mail1 podman ps -a"
     expect: ALLOW
   - command: "runagent -m mail1 podman ps -a --format '{{.Names}} [Status:{{.Status}}] [Restarts:{{.Restarts}}]'"
     expect: ALLOW
   - command: "runagent -m mail1 podman logs --tail 200 postfix"
+    expect: ALLOW
+  - command: "runagent -m nethvoice42 podman logs phonebook"
+    expect: ALLOW
+  - command: "runagent -m nethvoice42 podman logs --tail 500 --since 2026-09-03T09:00:00Z --timestamps phonebook"
     expect: ALLOW
   - command: "runagent -m mail1 podman system info --format='{{.Store.VolumePath}}'"
     expect: ALLOW
@@ -98,6 +120,10 @@ allow:
   - command: "redis-cli --raw get cluster/default_instance/traefik"
     expect: ALLOW
   - command: "redis-cli --raw HGETALL cluster/module_node"
+    expect: ALLOW
+  - command: "redis-cli HGETALL cluster/module-node_1/status"
+    expect: ALLOW
+  - command: "redis-cli HGETALL module/mail1/environment"
     expect: ALLOW
   - command: "redis-cli get module/mail1/ui_name"
     expect: ALLOW
@@ -157,11 +183,15 @@ ask:
     expect: ASK
   - command: "runagent -m mail1 podman inspect postfix"
     expect: ASK
-  - command: "runagent -m mail1 podman logs --tail 1001 postfix"
+  - command: "runagent -m mail1 podman logs --follow postfix"
+    expect: ASK
+  - command: "runagent -m mail1 podman logs -f postfix"
+    expect: ASK
+  - command: "runagent -m mail1 systemctl --user show postfix.service --property=ActiveState --value --no-pager"
     expect: ASK
   - command: "runagent -m mail1 sh -lc 'id'"
     expect: ASK
-  - command: "redis-cli HGETALL module/mail1/environment"
+  - command: "redis-cli HGETALL module/mail1/environment extra"
     expect: ASK
   - command: "redis-cli --raw KEYS 'node/*/vpn'"
     expect: ASK

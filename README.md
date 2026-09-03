@@ -83,7 +83,7 @@ The policy file is bootstrapped from `policy/default.yaml` when absent. The data
 
 ### Default NethServer policy
 
-The default policy includes standalone read-only diagnostics audited from the [NethServer agent skills at commit `7d8690e`](https://github.com/NethServer/agents/tree/7d8690e07002b19f99fd92155100b772281282bb/skills). It covers narrowly shaped host health checks, NS8 inventory actions, module-scoped systemd/Podman inspection, selected public Redis inventory, and exact NethVoice status commands. Journal and container log tails are limited to 1,000 entries.
+The default policy includes standalone read-only diagnostics audited from the [NethServer agent skills at commit `7d8690e`](https://github.com/NethServer/agents/tree/7d8690e07002b19f99fd92155100b772281282bb/skills) and exercised against a real NS8 support session. It uses anchored command-family regexps so the same checks work with different module, unit, container, user, and Redis key names. It covers host health, bounded journals, NS8 inventory actions, module-scoped systemd/Podman inspection, read-only Redis lookups, and exact NethVoice status commands. Following logs and state-changing verbs are not auto-approved.
 
 Presentation pipelines from the source skill are intentionally not auto-approved. Submit the machine-readable command by itself and process its output on the agent side:
 
@@ -91,7 +91,7 @@ Presentation pipelines from the source skill are intentionally not auto-approved
 gate-sh --agent codex-1 -c 'api-cli run list-installed-modules'
 ```
 
-Generic API actions, `get-configuration`, Podman inspection, environment or credential reads, external network probes, interactive/following commands, shell composition, and all state-changing operations remain `ASK` or `DENY`. An existing `$XDG_CONFIG_HOME/gate/policy.yaml` is never overwritten; operators must review and merge new default rules into an existing active policy explicitly.
+Generic API actions, `get-configuration`, Podman inspection, credential-specific reads, external network probes, interactive/following commands, shell composition, and all state-changing operations remain `ASK` or `DENY`. Redis `HGETALL` is auto-approved only for a standalone, safely shaped key and its output remains part of Gate's audit history. An existing `$XDG_CONFIG_HOME/gate/policy.yaml` is never overwritten; operators must review and merge new default rules into an existing active policy explicitly.
 
 ### Hosted Gate over restricted SSH
 
