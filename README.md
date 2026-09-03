@@ -81,6 +81,18 @@ $XDG_CONFIG_HOME/gate/policy.yaml
 
 The policy file is bootstrapped from `policy/default.yaml` when absent. The database and socket are mode `0600`.
 
+### Default NethServer policy
+
+The default policy includes standalone read-only diagnostics audited from the [NethServer agent skills at commit `7d8690e`](https://github.com/NethServer/agents/tree/7d8690e07002b19f99fd92155100b772281282bb/skills). It covers narrowly shaped host health checks, NS8 inventory actions, module-scoped systemd/Podman inspection, selected public Redis inventory, and exact NethVoice status commands. Journal and container log tails are limited to 1,000 entries.
+
+Presentation pipelines from the source skill are intentionally not auto-approved. Submit the machine-readable command by itself and process its output on the agent side:
+
+```bash
+gate-sh --agent codex-1 -c 'api-cli run list-installed-modules'
+```
+
+Generic API actions, `get-configuration`, Podman inspection, environment or credential reads, external network probes, interactive/following commands, shell composition, and all state-changing operations remain `ASK` or `DENY`. An existing `$XDG_CONFIG_HOME/gate/policy.yaml` is never overwritten; operators must review and merge new default rules into an existing active policy explicitly.
+
 ### Hosted Gate over restricted SSH
 
 Copy `config/ssh-clients.example.yaml` to `~/.config/gate/ssh-clients.yaml` and map each authorized key fingerprint to its audit identity. Start the Gate daemon/operator console on the host, attach that identity to a Gate target, and restrict its public key:
