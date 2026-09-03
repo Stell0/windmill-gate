@@ -87,7 +87,7 @@ func (f *repeatedFlag) Set(value string) error {
 func runServer(args []string, withUI bool, stdin io.Reader, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("gate", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	var socketPath, sshSocketPath, databasePath, policyPath, bastion, sancho, selector, agentID, operator, hostsPath string
+	var socketPath, sshSocketPath, databasePath, policyPath, bastion, sancho, selector, sessionSelector, agentID, operator, hostsPath string
 	var outputLimit int64
 	var targetSSHPort int
 	var sshArgs repeatedFlag
@@ -98,6 +98,7 @@ func runServer(args []string, withUI bool, stdin io.Reader, stdout, stderr io.Wr
 	flags.StringVar(&bastion, "bastion", os.Getenv("GATE_BASTION"), "Bastion SSH host")
 	flags.StringVar(&sancho, "sancho", envOr("GATE_SANCHO", "sancho"), "Sancho executable on Bastion")
 	flags.StringVar(&selector, "target", "", "target display name or displayed number")
+	flags.StringVar(&sessionSelector, "session", "", "private Windmill session ID (operator only)")
 	flags.StringVar(&agentID, "agent", config.AgentIdentity(), "initial attached agent identity")
 	flags.StringVar(&operator, "operator", envOr("GATE_OPERATOR", "operator"), "operator audit identity")
 	flags.StringVar(&hostsPath, "hosts-file", envOr("GATE_HOSTS_FILE", "/etc/hosts"), "Gate-managed hosts file")
@@ -109,6 +110,10 @@ func runServer(args []string, withUI bool, stdin io.Reader, stdout, stderr io.Wr
 	}
 	if flags.NArg() != 0 {
 		fmt.Fprintln(stderr, "gate: unexpected positional arguments")
+		return 2
+	}
+	if selector != "" && sessionSelector != "" {
+		fmt.Fprintln(stderr, "gate: --target and --session are mutually exclusive")
 		return 2
 	}
 	if bastion == "" {
@@ -145,7 +150,12 @@ func runServer(args []string, withUI bool, stdin io.Reader, stdout, stderr io.Wr
 		fmt.Fprintf(stderr, "gate: %v\n", err)
 		return 1
 	}
-	selected, err := chooseTarget(available, selector, stdin, stdout)
+	var selected backend.Target
+	if sessionSelector != "" {
+		selected, err = chooseSession(available, sessionSelector)
+	} else {
+		selected, err = chooseTarget(available, selector, stdin, stdout)
+	}
 	if err != nil {
 		fmt.Fprintf(stderr, "gate: %v\n", err)
 		return 1
@@ -653,6 +663,18 @@ func runPolicyReview(args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintf(stdout, "Created branch: %s\nPull request: %s\nNo policy was merged or deployed; human review is required.\n", proposal.Branch, proposal.PullURL)
 	return 0
+}
+
+func chooseSession(targets []backend.Target, sessionID string) (backend.Target, error) {
+	if len(targets) == 0 {
+		return backend.Target{}, errors.New("Sancho reported no available sessions")
+	}
+	for _, candidate := range targets {
+		if candidate.ID == sessionID {
+			return candidate, nil
+		}
+	}
+	return backend.Target{}, errors.New("Windmill session not found")
 }
 
 func chooseTarget(targets []backend.Target, selector string, input io.Reader, output io.Writer) (backend.Target, error) {

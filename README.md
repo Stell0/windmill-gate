@@ -55,6 +55,14 @@ Start Gate with the interactive operator console. The target selector prints dis
 bin/gate --bastion operator@bastion.example --agent codex-1
 ```
 
+An operator who already knows the private Windmill session ID can select it without exposing it through the target picker or agent protocol:
+
+```bash
+bin/gate --bastion operator@bastion.example --agent codex-1 --session '<session-id>'
+```
+
+`--session` is operator-only and mutually exclusive with `--target`. The existing `--target` option continues to accept a display name or displayed number.
+
 In another terminal, submit exactly one command:
 
 ```bash
