@@ -9,6 +9,7 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	"github.com/nethserver/gate/internal/approval"
 	"github.com/nethserver/gate/internal/backend"
@@ -22,7 +23,9 @@ type App struct {
 	Input    io.Reader
 	Output   io.Writer
 
-	discovered []backend.Target
+	discovered     []backend.Target
+	singleKeyInput bool
+	terminalOutput bool
 }
 
 func (a *App) Run(ctx context.Context) error {
@@ -38,23 +41,29 @@ func (a *App) Run(ctx context.Context) error {
 	if a.Output == nil {
 		a.Output = io.Discard
 	}
+	restoreInput, singleKeyInput, err := configureCharacterInput(a.Input)
+	if err != nil {
+		return fmt.Errorf("configure operator terminal: %w", err)
+	}
+	if restoreInput != nil {
+		defer restoreInput()
+	}
+	a.singleKeyInput = singleKeyInput
+	a.terminalOutput = writerIsTerminal(a.Output)
+	if a.terminalOutput {
+		defer a.setTerminalTitle(false)
+	}
+
 	lines := make(chan string)
 	scanErrors := make(chan error, 1)
-	go func() {
-		scanner := bufio.NewScanner(a.Input)
-		for scanner.Scan() {
-			select {
-			case lines <- scanner.Text():
-			case <-ctx.Done():
-				return
-			}
-		}
-		scanErrors <- scanner.Err()
-	}()
+	var pendingCount atomic.Int64
+	go readOperatorLines(ctx, a.Input, a.singleKeyInput, &pendingCount, lines, scanErrors)
 
 	a.printBanner()
 	a.renderTargets()
 	pending := a.Service.Approvals.List()
+	pendingCount.Store(int64(len(pending)))
+	a.setTerminalTitle(len(pending) > 0)
 	a.renderPendingItems(pending)
 	displayedPending := pendingSignature(pending)
 	promptVisible := false
@@ -70,6 +79,8 @@ func (a *App) Run(ctx context.Context) error {
 			return err
 		case <-a.Service.Approvals.Changed():
 			pending := a.Service.Approvals.List()
+			pendingCount.Store(int64(len(pending)))
+			a.setTerminalTitle(len(pending) > 0)
 			signature := pendingSignature(pending)
 			if signature == displayedPending {
 				continue
@@ -82,7 +93,9 @@ func (a *App) Run(ctx context.Context) error {
 			promptVisible = false
 		case line := <-lines:
 			promptVisible = false
-			quit, err := a.handle(ctx, strings.TrimSpace(line))
+			line = strings.TrimSpace(line)
+			decisionInput := isDecisionInput(line)
+			quit, err := a.handle(ctx, line)
 			if err != nil {
 				fmt.Fprintf(a.Output, "error: %s\n", operatorText(err.Error()))
 			}
@@ -90,11 +103,81 @@ func (a *App) Run(ctx context.Context) error {
 				return nil
 			}
 			pending := a.Service.Approvals.List()
+			pendingCount.Store(int64(len(pending)))
+			a.setTerminalTitle(len(pending) > 0)
 			signature := pendingSignature(pending)
+			if err == nil && decisionInput && a.terminalOutput {
+				a.redraw(pending)
+				displayedPending = signature
+				continue
+			}
 			if signature != displayedPending {
 				displayedPending = signature
 				a.renderPendingItems(pending)
 			}
+		}
+	}
+}
+
+func readOperatorLines(ctx context.Context, input io.Reader, singleKey bool, pendingCount *atomic.Int64, lines chan<- string, readErrors chan<- error) {
+	reader := bufio.NewReader(input)
+	var current []byte
+	swallowLineEnd := false
+	send := func(line string) bool {
+		select {
+		case lines <- line:
+			return true
+		case <-ctx.Done():
+			return false
+		}
+	}
+	for {
+		value, err := reader.ReadByte()
+		if err != nil {
+			if errors.Is(err, io.EOF) && len(current) > 0 && !send(string(current)) {
+				return
+			}
+			select {
+			case readErrors <- func() error {
+				if errors.Is(err, io.EOF) {
+					return nil
+				}
+				return err
+			}():
+			case <-ctx.Done():
+			}
+			return
+		}
+
+		if swallowLineEnd {
+			if value == '\n' {
+				swallowLineEnd = false
+				continue
+			}
+			if value == '\r' {
+				continue
+			}
+			swallowLineEnd = false
+		}
+		if singleKey && pendingCount.Load() == 1 && len(current) == 0 && (value == 'a' || value == 's' || value == 'd') {
+			if !send(string(value)) {
+				return
+			}
+			swallowLineEnd = true
+			continue
+		}
+		switch value {
+		case '\r', '\n':
+			if !send(string(current)) {
+				return
+			}
+			current = current[:0]
+		case '\b', 0x7f:
+			if len(current) > 0 {
+				current = current[:len(current)-1]
+			}
+		default:
+			current = append(current, value)
 		}
 	}
 }
@@ -144,8 +227,38 @@ func (a *App) renderPendingItems(pending []approval.Pending) {
 		fmt.Fprintf(a.Output, "  id:      %s\n", item.Command.ID)
 		fmt.Fprintf(a.Output, "  hash:    %s\n", item.Command.Hash)
 		fmt.Fprintf(a.Output, "  policy:  %s (%s)\n", item.Policy.Decision, item.Policy.Source)
-		fmt.Fprintln(a.Output, "  [a] approve once  [s] allow similar for target until detach  [d] deny  (press Enter)")
+		guidance := "press Enter; without an ID the newest command is selected"
+		if len(pending) == 1 && a.singleKeyInput {
+			guidance = "single key; no Enter required"
+		}
+		fmt.Fprintf(a.Output, "  [a] approve once  [s] allow similar for target until detach  [d] deny  (%s)\n", guidance)
 	}
+}
+
+func (a *App) redraw(pending []approval.Pending) {
+	fmt.Fprint(a.Output, "\x1b[2J\x1b[H")
+	a.printBanner()
+	a.renderTargets()
+	a.renderPendingItems(pending)
+}
+
+func (a *App) setTerminalTitle(waiting bool) {
+	if !a.terminalOutput {
+		return
+	}
+	title := "Gate"
+	if waiting {
+		title = "[!] Gate"
+	}
+	fmt.Fprintf(a.Output, "\x1b]0;%s\x07", title)
+}
+
+func isDecisionInput(line string) bool {
+	fields := strings.Fields(line)
+	if len(fields) < 1 || len(fields) > 2 {
+		return false
+	}
+	return fields[0] == "a" || fields[0] == "s" || fields[0] == "d"
 }
 
 func pendingSignature(pending []approval.Pending) string {
@@ -307,7 +420,9 @@ func (a *App) decide(action, commandID string) error {
 	if len(pending) == 0 {
 		return errors.New("no commands are waiting")
 	}
-	item := pending[0]
+	// Broker.List returns commands oldest first, so an omitted ID selects the
+	// command the operator most recently saw arrive.
+	item := pending[len(pending)-1]
 	if commandID != "" {
 		found := false
 		for _, candidate := range pending {
@@ -319,8 +434,6 @@ func (a *App) decide(action, commandID string) error {
 		if !found {
 			return errors.New("waiting command not found")
 		}
-	} else if len(pending) > 1 {
-		return errors.New("multiple commands are waiting; specify a command ID")
 	}
 	decision := approval.Decision{CommandID: item.Command.ID, Hash: item.Command.Hash, Actor: a.Operator}
 	switch action {
