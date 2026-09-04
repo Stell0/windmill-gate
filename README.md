@@ -1,4 +1,6 @@
-# Gate
+<img width="220" height="166" alt="computer-drinking2" src="https://github.com/user-attachments/assets/82d235ba-1741-4ffe-9862-8c6de1469123" />
+
+# Windmill Gate
 
 Gate lets an AI agent inspect a production system while a human stays in
 control.
@@ -35,11 +37,11 @@ compile anything.
 In the operator terminal, replace the example Bastion address:
 
 ```bash
-./gate --bastion operator@bastion.example --agent codex-1
+./gate --bastion operator@bastion.example --agent codex-1 --session <session id>
 ```
 
-Gate shows the available production targets. Choose one by number and leave
-this terminal open.
+And leave this terminal open.
+
 
 When a command needs a decision, press:
 
