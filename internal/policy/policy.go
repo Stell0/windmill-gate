@@ -8,7 +8,6 @@ import (
 	"regexp"
 	"strings"
 	"sync"
-	"unicode"
 
 	"gopkg.in/yaml.v3"
 )
@@ -22,8 +21,17 @@ const (
 )
 
 type Config struct {
-	Allow []string `yaml:"allow"`
-	Deny  []string `yaml:"deny"`
+	Allow          []string        `yaml:"allow"`
+	ValidatedAllow []ValidatedRule `yaml:"validated_allow"`
+	Deny           []string        `yaml:"deny"`
+}
+
+// ValidatedRule combines a coarse regexp with a named semantic validator. The
+// regexp keeps policy files readable; the validator proves argument-level
+// safety before the command can be automatically allowed.
+type ValidatedRule struct {
+	Regexp    string `yaml:"regexp"`
+	Validator string `yaml:"validator"`
 }
 
 type Result struct {
@@ -37,9 +45,15 @@ type compiledRule struct {
 	regexp  *regexp.Regexp
 }
 
+type compiledValidatedRule struct {
+	compiledRule
+	validator string
+}
+
 type Engine struct {
-	allow []compiledRule
-	deny  []compiledRule
+	allow          []compiledRule
+	validatedAllow []compiledValidatedRule
+	deny           []compiledRule
 
 	mu        sync.RWMutex
 	temporary map[string][]compiledRule
@@ -68,7 +82,11 @@ func Parse(data []byte) (*Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Engine{allow: allow, deny: deny, temporary: make(map[string][]compiledRule)}, nil
+	validatedAllow, err := compileValidatedRules(config.ValidatedAllow)
+	if err != nil {
+		return nil, err
+	}
+	return &Engine{allow: allow, validatedAllow: validatedAllow, deny: deny, temporary: make(map[string][]compiledRule)}, nil
 }
 
 func New(config Config) (*Engine, error) {
@@ -80,30 +98,43 @@ func New(config Config) (*Engine, error) {
 }
 
 func (e *Engine) Evaluate(targetID, command string) Result {
-	for _, rule := range e.deny {
-		if rule.regexp.MatchString(command) {
-			return Result{Decision: Deny, Rule: rule.pattern, Source: "persistent"}
+	views, parseErr := commandViews(command)
+	for _, view := range views {
+		for _, rule := range e.deny {
+			if rule.regexp.MatchString(view.text) {
+				return Result{Decision: Deny, Rule: rule.pattern, Source: "persistent"}
+			}
 		}
 	}
 
-	// Shell composition cannot become automatically allowed through the first
-	// regex engine. A future parser can make narrower, tested exceptions.
-	if HasUnsafeComposition(command) {
+	// A malformed or shell-composed payload is never automatically allowed.
+	// DENY rules were intentionally checked first so dangerous commands retain
+	// their stronger classification when their outer text matches a deny rule.
+	if parseErr != nil {
 		return Result{Decision: Ask, Source: "default"}
 	}
 
+	// Target-scoped rules apply only to the submitted outer payload. They are
+	// never inherited by runagent or podman wrapper views.
 	e.mu.RLock()
 	for _, rule := range e.temporary[targetID] {
-		if rule.regexp.MatchString(command) {
+		if rule.regexp.MatchString(views[0].text) {
 			e.mu.RUnlock()
 			return Result{Decision: Allow, Rule: rule.pattern, Source: "target"}
 		}
 	}
 	e.mu.RUnlock()
 
-	for _, rule := range e.allow {
-		if rule.regexp.MatchString(command) {
-			return Result{Decision: Allow, Rule: rule.pattern, Source: "persistent"}
+	for _, view := range views {
+		for _, rule := range e.allow {
+			if rule.regexp.MatchString(view.text) {
+				return Result{Decision: Allow, Rule: rule.pattern, Source: "persistent"}
+			}
+		}
+		for _, rule := range e.validatedAllow {
+			if rule.regexp.MatchString(view.text) && validators[rule.validator](view.words) {
+				return Result{Decision: Allow, Rule: rule.pattern, Source: "persistent"}
+			}
 		}
 	}
 	return Result{Decision: Ask, Source: "default"}
@@ -156,16 +187,28 @@ func compileRules(kind string, patterns []string) ([]compiledRule, error) {
 	return rules, nil
 }
 
-var unsafeComposition = regexp.MustCompile("(?:;|&&|\\||>>|>|<|\\$\\(|`|\\n|\\r)")
+func compileValidatedRules(config []ValidatedRule) ([]compiledValidatedRule, error) {
+	rules := make([]compiledValidatedRule, 0, len(config))
+	for index, item := range config {
+		if item.Regexp == "" {
+			return nil, fmt.Errorf("validated_allow rule %d regexp is empty", index+1)
+		}
+		if _, ok := validators[item.Validator]; !ok {
+			return nil, fmt.Errorf("validated_allow rule %d has unknown validator %q", index+1, item.Validator)
+		}
+		compiled, err := regexp.Compile(item.Regexp)
+		if err != nil {
+			return nil, fmt.Errorf("compile validated_allow rule %d: %w", index+1, err)
+		}
+		rules = append(rules, compiledValidatedRule{
+			compiledRule: compiledRule{pattern: item.Regexp, regexp: compiled},
+			validator:    item.Validator,
+		})
+	}
+	return rules, nil
+}
 
 func HasUnsafeComposition(command string) bool {
-	if unsafeComposition.MatchString(command) {
-		return true
-	}
-	for _, r := range command {
-		if unicode.IsControl(r) {
-			return true
-		}
-	}
-	return false
+	_, err := tokenizeShell(command)
+	return err != nil
 }

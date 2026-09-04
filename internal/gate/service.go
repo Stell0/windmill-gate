@@ -14,13 +14,13 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/nethserver/gate/internal/approval"
-	"github.com/nethserver/gate/internal/backend"
-	"github.com/nethserver/gate/internal/command"
-	"github.com/nethserver/gate/internal/forward"
-	"github.com/nethserver/gate/internal/policy"
-	"github.com/nethserver/gate/internal/storage"
-	"github.com/nethserver/gate/internal/target"
+	"github.com/stell0/windmill-gate/internal/approval"
+	"github.com/stell0/windmill-gate/internal/backend"
+	"github.com/stell0/windmill-gate/internal/command"
+	"github.com/stell0/windmill-gate/internal/forward"
+	"github.com/stell0/windmill-gate/internal/policy"
+	"github.com/stell0/windmill-gate/internal/storage"
+	"github.com/stell0/windmill-gate/internal/target"
 )
 
 const DefaultOutputLimit int64 = 1024 * 1024
@@ -49,6 +49,8 @@ type Service struct {
 
 	backends map[string]backend.Backend
 	limit    int64
+	started  time.Time
+	authz    chan struct{}
 
 	mu          sync.RWMutex
 	attachments map[string]string
@@ -122,10 +124,26 @@ func NewService(store *storage.Store, engine *policy.Engine, broker *approval.Br
 		Store:       store,
 		backends:    byName,
 		limit:       DefaultOutputLimit,
+		started:     time.Now().UTC(),
+		authz:       make(chan struct{}, 1),
 		attachments: make(map[string]string),
 		sessions:    make(map[string]*Session),
 		running:     make(map[string]runningCommand),
 	}, nil
+}
+
+// StartedAt bounds the operator authorization ledger to this process run.
+func (s *Service) StartedAt() time.Time { return s.started }
+
+// AuthorizationChanged is a coalesced notification. Consumers must query the
+// audit store after receiving it; the channel itself is not an audit record.
+func (s *Service) AuthorizationChanged() <-chan struct{} { return s.authz }
+
+func (s *Service) notifyAuthorizationChanged() {
+	select {
+	case s.authz <- struct{}{}:
+	default:
+	}
 }
 
 func (s *Service) SetOutputLimit(limit int64) error {
@@ -252,6 +270,9 @@ func (s *Service) execute(parent context.Context, session *Session, payload []by
 	if err := s.Store.CreateCommand(parent, cmd.Snapshot(), result); err != nil {
 		return err
 	}
+	if result.Decision != policy.Ask {
+		s.notifyAuthorizationChanged()
+	}
 	if err := sink.Accepted(cmd.Snapshot(), result); err != nil {
 		return err
 	}
@@ -275,12 +296,15 @@ func (s *Service) execute(parent context.Context, session *Session, payload []by
 		decision, err := s.Approvals.Wait(parent, cmd, result)
 		if err != nil {
 			_ = cmd.Transition(command.Cancelled, nil)
-			_ = s.Store.UpdateCommand(context.WithoutCancel(parent), cmd.Snapshot())
+			if updateErr := s.Store.UpdateCommand(context.WithoutCancel(parent), cmd.Snapshot()); updateErr == nil {
+				s.notifyAuthorizationChanged()
+			}
 			return err
 		}
 		if err := s.Store.RecordApproval(parent, decision); err != nil {
 			return err
 		}
+		s.notifyAuthorizationChanged()
 		if decision.Action == approval.Deny {
 			return s.finishDenied(parent, cmd, sink, decision.Actor)
 		}
@@ -518,6 +542,9 @@ func (s *Service) authorizeCapability(ctx context.Context, session *Session, pay
 	if err := s.Store.CreateCommand(ctx, cmd.Snapshot(), result); err != nil {
 		return cmd, false, err
 	}
+	if result.Decision != policy.Ask {
+		s.notifyAuthorizationChanged()
+	}
 	if err := sink.Accepted(cmd.Snapshot(), result); err != nil {
 		return cmd, false, err
 	}
@@ -538,12 +565,15 @@ func (s *Service) authorizeCapability(ctx context.Context, session *Session, pay
 		decision, err := s.Approvals.Wait(ctx, cmd, result)
 		if err != nil {
 			_ = cmd.Transition(command.Cancelled, nil)
-			_ = s.Store.UpdateCommand(context.WithoutCancel(ctx), cmd.Snapshot())
+			if updateErr := s.Store.UpdateCommand(context.WithoutCancel(ctx), cmd.Snapshot()); updateErr == nil {
+				s.notifyAuthorizationChanged()
+			}
 			return cmd, false, err
 		}
 		if err := s.Store.RecordApproval(ctx, decision); err != nil {
 			return cmd, false, err
 		}
+		s.notifyAuthorizationChanged()
 		if decision.Action == approval.Deny {
 			return cmd, false, s.finishDenied(ctx, cmd, sink, decision.Actor)
 		}

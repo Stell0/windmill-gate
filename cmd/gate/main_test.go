@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nethserver/gate/internal/backend"
+	"github.com/stell0/windmill-gate/internal/backend"
 )
 
 func TestChooseTargetNeverDisplaysBackendID(t *testing.T) {

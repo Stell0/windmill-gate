@@ -8,14 +8,15 @@ description: Diagnose an operator-selected production target through Gate's non-
 Use Gate for every command that must run on the production target. Assume the
 operator has already selected that target and attached this agent identity.
 
-For a repository build, run:
+From a downloaded release directory, run:
 
 ```bash
-bin/gate-sh --agent <agent-identity> -c '<exact command>'
+./gate-sh --agent <agent-identity> -c '<exact command>'
 ```
 
-Use `gate-sh` instead of `bin/gate-sh` when Gate is installed on `PATH`. For a
-hosted Gate, add the configured restricted transport before `-c`:
+For a source build, use `bin/gate-sh`; when Gate is installed on `PATH`, use
+`gate-sh`. For a hosted Gate, add the configured restricted transport before
+`-c`:
 
 ```bash
 gate-sh --ssh <gate-host> --agent <agent-identity> -c '<exact command>'

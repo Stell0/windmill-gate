@@ -11,11 +11,11 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/nethserver/gate/internal/command"
-	"github.com/nethserver/gate/internal/forward"
-	gatecore "github.com/nethserver/gate/internal/gate"
-	"github.com/nethserver/gate/internal/policy"
-	"github.com/nethserver/gate/internal/protocol"
+	"github.com/stell0/windmill-gate/internal/command"
+	"github.com/stell0/windmill-gate/internal/forward"
+	gatecore "github.com/stell0/windmill-gate/internal/gate"
+	"github.com/stell0/windmill-gate/internal/policy"
+	"github.com/stell0/windmill-gate/internal/protocol"
 )
 
 type Server struct {

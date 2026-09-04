@@ -13,12 +13,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nethserver/gate/internal/approval"
-	"github.com/nethserver/gate/internal/backend"
-	gatecore "github.com/nethserver/gate/internal/gate"
-	"github.com/nethserver/gate/internal/policy"
-	"github.com/nethserver/gate/internal/protocol"
-	"github.com/nethserver/gate/internal/storage"
+	"github.com/stell0/windmill-gate/internal/approval"
+	"github.com/stell0/windmill-gate/internal/backend"
+	gatecore "github.com/stell0/windmill-gate/internal/gate"
+	"github.com/stell0/windmill-gate/internal/policy"
+	"github.com/stell0/windmill-gate/internal/protocol"
+	"github.com/stell0/windmill-gate/internal/storage"
 )
 
 type serverBackend struct {

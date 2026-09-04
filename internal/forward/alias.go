@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/nethserver/gate/internal/storage"
+	"github.com/stell0/windmill-gate/internal/storage"
 )
 
 type AliasInfo struct {

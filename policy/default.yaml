@@ -5,6 +5,16 @@
 # 7d8690e07002b19f99fd92155100b772281282bb. They allow only standalone,
 # bounded diagnostics; optional presentation pipelines from the source skill
 # remain ASK.
+validated_allow:
+  # These families need argument-level checks that a regular expression alone
+  # cannot express. Validators inspect but never rewrite the approved payload.
+  - regexp: '^(?:ls|cat|tail|grep|egrep|pgrep)(?: .*)?$'
+    validator: diagnostic_read
+  - regexp: '^/usr/bin/mysql(?: .*)?$'
+    validator: mysql_select
+  - regexp: '^journalctl _UID=[^ ]+ --since=.+ --until=.+ --no-pager -o short-iso-precise -n [^ ]+$'
+    validator: uid_journal
+
 allow:
   # Basic host identity and capacity checks; optional arguments remain explicit.
   - '^uname(?: -a)?$'
@@ -33,6 +43,14 @@ allow:
   - '^journalctl -b --no-pager -n (?:[1-9][0-9]{0,2}|1000)$'
   - '^journalctl -p err -b --no-pager -n (?:[1-9][0-9]{0,2}|1000)$'
   - '^journalctl _UID=[1-9][0-9]{0,9}(?: -p (?:emerg|alert|crit|err|warning|notice|info|debug|[0-7]))? --no-pager -n (?:[1-9][0-9]{0,2}|1000)$'
+  # Read creation/change timestamps for explicit rootless module home paths.
+  # The fixed, consistently quoted format excludes file contents, arbitrary
+  # paths, and additional stat options.
+  - '^stat -c (?:"%n %W %w %Y %y"|''%n %W %w %Y %y'')(?: /home/[a-zA-Z0-9][a-zA-Z0-9_.-]*)+$'
+
+  # Read one or more Asterisk configuration metadata records. The same rule is
+  # inherited through strict runagent/podman-exec wrapper views.
+  - '^stat -c (?:"%n %s %y"|''%n %s %y'')(?: /etc/asterisk/[a-zA-Z0-9][a-zA-Z0-9_.-]*\.conf)+$'
 
   # Inspect host containers and storage without following logs or mutating
   # container state.
@@ -56,10 +74,22 @@ allow:
   - '^api-cli run get-route --agent module/[a-zA-Z0-9][a-zA-Z0-9_.-]* --data ''\{"instance":"[a-zA-Z0-9][a-zA-Z0-9_.-]*"\}''$'
   - '^api-cli run list-certificates --agent module/[a-zA-Z0-9][a-zA-Z0-9_.-]*$'
 
+  # Query centralized logs only in bounded dump mode. Identifiers, search text,
+  # timezone, and optional ISO-8601 bounds exclude shell metacharacters.
+  - '^api-server-logs logs --help$'
+  - '^api-server-logs logs --entity (?:cluster|node|module)(?: --name [a-zA-Z0-9][a-zA-Z0-9_.-]*)?(?: --instance [a-zA-Z0-9][a-zA-Z0-9_.-]*)? --mode dump --lines (?:[1-9][0-9]{0,2}|1000)(?: --search [a-zA-Z0-9][a-zA-Z0-9_.:@/-]*)?(?: --timezone (?:UTC|[a-zA-Z]+(?:/[a-zA-Z0-9_+-]+)+))?(?: --from [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:Z|[+-][0-9]{2}:[0-9]{2}))?(?: --to [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:Z|[+-][0-9]{2}:[0-9]{2}))?$'
+
+  # Read only redacted task metadata from the fixed NS8 audit database. Do not
+  # generalize this to arbitrary SQLite queries: CLI helpers can read files or
+  # execute commands even when the database itself is opened read-only.
+  - '^sqlite3 -readonly -json /var/lib/nethserver/api-server/audit\.db "SELECT id,user,json_extract\(data,''\$\.action''\) AS task_action,json_extract\(data,''\$\.queue''\) AS task_queue,json_extract\(data,''\$\.timestamp''\) AS requested_at,timestamp AS audited_at FROM audit WHERE action=''create-task'' ORDER BY id DESC LIMIT (?:[1-9][0-9]{0,2}|1000)"$'
+  - '^sqlite3 -readonly -json /var/lib/nethserver/api-server/audit\.db "SELECT id,user,json_extract\(data,''\$\.action''\) AS task_action,json_extract\(data,''\$\.queue''\) AS task_queue,json_extract\(data,''\$\.timestamp''\) AS requested_at,timestamp AS audited_at FROM audit WHERE action=''create-task'' AND \(json_extract\(data,''\$\.action''\) IN \(''add-module'',''create-module'',''import-module'',''configure-module''\) OR json_extract\(data,''\$\.queue''\)=''module/[a-zA-Z0-9][a-zA-Z0-9_.-]*/tasks''\) ORDER BY id DESC LIMIT (?:[1-9][0-9]{0,2}|1000)"$'
+
   # Inspect per-module user services. Module and unit names are generalized so
   # the same diagnostics work for every installed instance.
   - '^runagent -m [a-zA-Z0-9][a-zA-Z0-9_.-]* systemctl --user list-units --all --no-pager$'
   - '^runagent -m [a-zA-Z0-9][a-zA-Z0-9_.-]* systemctl --user status [a-zA-Z0-9][a-zA-Z0-9_.@{},-]* --no-pager$'
+  - '^runagent -m [a-zA-Z0-9][a-zA-Z0-9_.-]* systemctl --user status \{[a-zA-Z0-9][a-zA-Z0-9_.@-]*(?:,[a-zA-Z0-9][a-zA-Z0-9_.@-]*)+\}\.service --no-pager$'
   - '^runagent -m [a-zA-Z0-9][a-zA-Z0-9_.-]* systemctl --user show [a-zA-Z0-9][a-zA-Z0-9_.@-]* --property=[a-zA-Z][a-zA-Z0-9]*(?:,[a-zA-Z][a-zA-Z0-9]*)* --no-pager$'
   - '^runagent -m [a-zA-Z0-9][a-zA-Z0-9_.-]* systemctl --user --failed --no-legend --no-pager$'
 
@@ -87,6 +117,7 @@ allow:
   # NethVoice checks execute only exact read-only commands inside freepbx.
   - '^runagent -m [a-zA-Z0-9][a-zA-Z0-9_.-]* podman exec freepbx (?:cat /etc/resolv\.conf|pgrep asterisk)$'
   - '^runagent -m [a-zA-Z0-9][a-zA-Z0-9_.-]* podman exec freepbx asterisk -rx ''(?:pjsip show contacts|pjsip show transports|database show AMPUSER|database show CF|queue show)''$'
+  - '^asterisk -rx (?:"(?:module show|core show|database show|pjsip show)(?: [a-zA-Z0-9][a-zA-Z0-9_.:/@*-]*)*"|''(?:module show|core show|database show|pjsip show)(?: [a-zA-Z0-9][a-zA-Z0-9_.:/@*-]*)*'')$'
 
   # Gate-managed web forwards remain target-scoped and loopback-only.
   - '^gate forward add --remote-port (?:80|443)$'

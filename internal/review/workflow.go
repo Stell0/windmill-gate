@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nethserver/gate/internal/policy"
+	"github.com/stell0/windmill-gate/internal/policy"
 	"gopkg.in/yaml.v3"
 )
 

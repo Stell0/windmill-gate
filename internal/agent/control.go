@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/nethserver/gate/internal/protocol"
+	"github.com/stell0/windmill-gate/internal/protocol"
 )
 
 // Control sends one target-scoped capability request over the same transport

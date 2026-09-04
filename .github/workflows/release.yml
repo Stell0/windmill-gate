@@ -1,0 +1,38 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Test
+        run: |
+          make policy-test
+          make test
+
+      - name: Build release archives
+        env:
+          GATE_RELEASE_VERSION: ${{ github.ref_name }}
+        run: sh scripts/build-release.sh "$GATE_RELEASE_VERSION"
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_RELEASE_VERSION: ${{ github.ref_name }}
+        run: gh release create "$GATE_RELEASE_VERSION" dist/* --verify-tag --generate-notes

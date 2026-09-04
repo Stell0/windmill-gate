@@ -13,10 +13,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nethserver/gate/internal/approval"
-	"github.com/nethserver/gate/internal/command"
-	"github.com/nethserver/gate/internal/policy"
-	"github.com/nethserver/gate/internal/target"
+	"github.com/stell0/windmill-gate/internal/approval"
+	"github.com/stell0/windmill-gate/internal/command"
+	"github.com/stell0/windmill-gate/internal/policy"
+	"github.com/stell0/windmill-gate/internal/target"
 	_ "modernc.org/sqlite"
 )
 
@@ -392,6 +392,75 @@ type HistoryEntry struct {
 	ApprovalActor  string          `json:"approval_actor,omitempty"`
 	OutputBytes    int64           `json:"output_bytes"`
 	Truncated      bool            `json:"output_truncated"`
+}
+
+// AuthorizationEntry is an operator-facing authorization decision. It is
+// derived from commands and approvals and deliberately contains no backend
+// identifiers, policy rule details, output, or private target metadata.
+type AuthorizationEntry struct {
+	CommandID     string
+	AgentIdentity string
+	Command       string
+	Label         string
+	CreatedAt     time.Time
+}
+
+// AuthorizationsSince returns decisions made for commands created during the
+// current service run. ASK commands appear only after a human decision or when
+// they are cancelled before a decision.
+func (s *Store) AuthorizationsSince(ctx context.Context, startedAt time.Time) ([]AuthorizationEntry, error) {
+	rows, err := s.db.QueryContext(ctx, `
+        SELECT c.id, a.identity, CAST(c.payload AS TEXT), c.state,
+               c.policy_result, COALESCE(ap.action, ''), c.created_at_ns
+        FROM commands c
+        JOIN agent_sessions a ON a.id = c.agent_session_id
+        LEFT JOIN approvals ap ON ap.id = (
+            SELECT MAX(id) FROM approvals WHERE command_id = c.id
+        )
+        WHERE c.created_at_ns >= ?
+          AND (
+              c.policy_result IN ('ALLOW', 'DENY')
+              OR (c.policy_result = 'ASK' AND (ap.action IS NOT NULL OR c.state = 'cancelled'))
+          )
+        ORDER BY c.created_at_ns, c.id`, startedAt.UnixNano())
+	if err != nil {
+		return nil, fmt.Errorf("query authorizations: %w", err)
+	}
+	defer rows.Close()
+	var entries []AuthorizationEntry
+	for rows.Next() {
+		var entry AuthorizationEntry
+		var state command.State
+		var policyResult policy.Decision
+		var action string
+		var created int64
+		if err := rows.Scan(&entry.CommandID, &entry.AgentIdentity, &entry.Command, &state, &policyResult, &action, &created); err != nil {
+			return nil, fmt.Errorf("scan authorization: %w", err)
+		}
+		switch policyResult {
+		case policy.Allow:
+			entry.Label = "AUTO APPROVE"
+		case policy.Deny:
+			entry.Label = "AUTO BLOCKED"
+		case policy.Ask:
+			switch action {
+			case string(approval.ApproveOnce), string(approval.AllowTarget):
+				entry.Label = "USER APPROVE"
+			case string(approval.Deny):
+				entry.Label = "USER BLOCKED"
+			default:
+				if state == command.Cancelled {
+					entry.Label = "CANCELLED"
+				}
+			}
+		}
+		if entry.Label == "" {
+			continue
+		}
+		entry.CreatedAt = time.Unix(0, created).UTC()
+		entries = append(entries, entry)
+	}
+	return entries, wrap("iterate authorizations", rows.Err())
 }
 
 // History deliberately selects no backend_id column.

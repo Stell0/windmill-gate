@@ -12,12 +12,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nethserver/gate/internal/approval"
-	"github.com/nethserver/gate/internal/backend"
-	"github.com/nethserver/gate/internal/command"
-	gatecore "github.com/nethserver/gate/internal/gate"
-	"github.com/nethserver/gate/internal/policy"
-	"github.com/nethserver/gate/internal/storage"
+	"github.com/stell0/windmill-gate/internal/approval"
+	"github.com/stell0/windmill-gate/internal/backend"
+	"github.com/stell0/windmill-gate/internal/command"
+	gatecore "github.com/stell0/windmill-gate/internal/gate"
+	"github.com/stell0/windmill-gate/internal/policy"
+	"github.com/stell0/windmill-gate/internal/storage"
 )
 
 type tuiBackend struct{}
@@ -61,7 +61,7 @@ func TestApprovalViewShowsSecurityContextAndCanApprove(t *testing.T) {
 	app := App{Service: service, Operator: "alice", Output: &output}
 	app.renderPending()
 	rendered := output.String()
-	for _, required := range []string{"customer-a", public.ID, "codex-1", pending[0].Command.Payload, pending[0].Command.Hash, "ASK", "approve once", "target until detach"} {
+	for _, required := range []string{"customer-a", public.ID, "codex-1", pending[0].Command.Payload, pending[0].Command.Hash, "ASK", "Approve? [y] once", "target until detach"} {
 		if !strings.Contains(rendered, required) {
 			t.Errorf("approval view omitted %q:\n%s", required, rendered)
 		}
@@ -69,7 +69,7 @@ func TestApprovalViewShowsSecurityContextAndCanApprove(t *testing.T) {
 	if strings.Contains(rendered, "private-id") {
 		t.Fatalf("approval view leaked backend ID: %s", rendered)
 	}
-	if _, err := app.handle(context.Background(), "a "+pending[0].Command.ID); err != nil {
+	if _, err := app.handle(context.Background(), "y "+pending[0].Command.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := <-done; err != nil {
@@ -118,7 +118,7 @@ func TestApprovalDecisionPrintsOneNewPrompt(t *testing.T) {
 		appDone <- (&App{Service: service, Operator: "alice", Input: input, Output: output}).Run(context.Background())
 	}()
 	waitForOutput(t, output, func(value string) bool { return strings.Count(value, "gate> ") == 1 })
-	if _, err := io.WriteString(commands, "a\n"); err != nil {
+	if _, err := io.WriteString(commands, "y\n"); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -179,7 +179,7 @@ func TestDecisionWithoutIDUsesNewestPendingCommand(t *testing.T) {
 	pending := service.Approvals.List()
 	newestID := pending[len(pending)-1].Command.ID
 	app := App{Service: service, Operator: "alice", Output: io.Discard}
-	if _, err := app.handle(context.Background(), "d"); err != nil {
+	if _, err := app.handle(context.Background(), "n"); err != nil {
 		t.Fatal(err)
 	}
 	remaining := service.Approvals.List()
@@ -189,7 +189,7 @@ func TestDecisionWithoutIDUsesNewestPendingCommand(t *testing.T) {
 	if remaining[0].Command.ID == newestID {
 		t.Fatal("decision without an ID selected the oldest command")
 	}
-	if _, err := app.handle(context.Background(), "d "+remaining[0].Command.ID); err != nil {
+	if _, err := app.handle(context.Background(), "n "+remaining[0].Command.ID); err != nil {
 		t.Fatal(err)
 	}
 	for _, done := range []<-chan error{firstDone, secondDone} {
@@ -198,6 +198,34 @@ func TestDecisionWithoutIDUsesNewestPendingCommand(t *testing.T) {
 		case <-time.After(time.Second):
 			t.Fatal("denied command did not finish")
 		}
+	}
+}
+
+func TestSimilarDecisionKeyWorksInLineMode(t *testing.T) {
+	store, err := storage.Open(filepath.Join(t.TempDir(), "gate.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	engine, _ := policy.New(policy.Config{})
+	service, _ := gatecore.NewService(store, engine, approval.NewBroker(), tuiBackend{})
+	public, _ := service.AddTarget(context.Background(), "test", backend.Target{ID: "private-id", DisplayName: "customer-a"})
+	_ = service.Attach("codex-1", public.ID)
+	session, _ := service.OpenSession(context.Background(), "codex-1", "unix", "")
+	defer session.Close(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- session.Exec(context.Background(), []byte("diagnose 123"), discardSink{}) }()
+	waitForPendingCount(t, service, 1)
+	pending := service.Approvals.List()[0]
+	app := App{Service: service, Operator: "alice", Output: io.Discard}
+	if _, err := app.handle(context.Background(), "s "+pending.Command.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if rules := service.Policy.TemporaryRules(public.ID); len(rules) != 1 {
+		t.Fatalf("similar decision installed %d rules, want 1", len(rules))
 	}
 }
 
@@ -213,13 +241,13 @@ func TestSingleKeyDecisionDoesNotRequireNewline(t *testing.T) {
 	pendingCount.Store(1)
 	go readOperatorLines(ctx, input, true, &pendingCount, lines, readErrors)
 
-	if _, err := io.WriteString(commands, "a"); err != nil {
+	if _, err := io.WriteString(commands, "y"); err != nil {
 		t.Fatal(err)
 	}
 	select {
 	case line := <-lines:
-		if line != "a" {
-			t.Fatalf("single-key line = %q, want a", line)
+		if line != "y" {
+			t.Fatalf("single-key line = %q, want y", line)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("single-key decision waited for a newline")
@@ -237,6 +265,153 @@ func TestSingleKeyDecisionDoesNotRequireNewline(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("next operator command was not read")
+	}
+}
+
+func TestAllDecisionKeysWorkInSingleKeyMode(t *testing.T) {
+	for _, key := range []string{"y", "s", "n"} {
+		t.Run(key, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			input, commands := io.Pipe()
+			defer input.Close()
+			defer commands.Close()
+			lines := make(chan string, 1)
+			readErrors := make(chan error, 1)
+			var pendingCount atomic.Int64
+			pendingCount.Store(1)
+			go readOperatorLines(ctx, input, true, &pendingCount, lines, readErrors)
+			if _, err := io.WriteString(commands, key); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case line := <-lines:
+				if line != key {
+					t.Fatalf("single-key line = %q, want %q", line, key)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("single-key decision waited for a newline")
+			}
+		})
+	}
+}
+
+func TestLegacyDecisionKeysAreRejected(t *testing.T) {
+	app := App{Service: &gatecore.Service{}, Output: io.Discard}
+	for _, input := range []string{"a", "d", "a cmd_1", "d cmd_1"} {
+		if _, err := app.handle(context.Background(), input); err == nil || !strings.Contains(err.Error(), "unknown operator command") {
+			t.Errorf("legacy input %q was not rejected: %v", input, err)
+		}
+	}
+}
+
+func TestAuthorizationLedgerUsesAuditLabelsDeduplicatesAndEscapes(t *testing.T) {
+	store, err := storage.Open(filepath.Join(t.TempDir(), "gate.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	engine, err := policy.New(policy.Config{
+		Allow: []string{`^(?:uptime|date)$`},
+		Deny:  []string{`^reboot$`},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := gatecore.NewService(store, engine, approval.NewBroker(), tuiBackend{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	public, _ := service.AddTarget(context.Background(), "test", backend.Target{ID: "private-id", DisplayName: "customer-a"})
+	_ = service.Attach("codex-1", public.ID)
+	session, _ := service.OpenSession(context.Background(), "codex-1", "unix", "")
+	defer session.Close(context.Background())
+
+	// Concurrent automatic decisions prove that the coalesced notification is
+	// only a wakeup: the ledger is rebuilt from all authoritative rows.
+	autoDone := make(chan error, 2)
+	go func() { autoDone <- session.Exec(context.Background(), []byte("uptime"), discardSink{}) }()
+	go func() { autoDone <- session.Exec(context.Background(), []byte("date"), discardSink{}) }()
+	for range 2 {
+		if err := <-autoDone; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := session.Exec(context.Background(), []byte("reboot"), discardSink{}); err != nil {
+		t.Fatal(err)
+	}
+
+	runDecision := func(payload string, action approval.Action) {
+		t.Helper()
+		done := make(chan error, 1)
+		go func() { done <- session.Exec(context.Background(), []byte(payload), discardSink{}) }()
+		waitForPendingCount(t, service, 1)
+		pending := service.Approvals.List()[0]
+		if err := service.Approvals.Decide(approval.Decision{
+			CommandID: pending.Command.ID, Hash: pending.Command.Hash, Action: action, Actor: "alice",
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	}
+	runDecision("manual read", approval.ApproveOnce)
+	runDecision("manual block", approval.Deny)
+	runDecision("repeat 123", approval.AllowTarget)
+	if err := session.Exec(context.Background(), []byte("repeat 456"), discardSink{}); err != nil {
+		t.Fatal(err)
+	}
+
+	cancelCtx, cancel := context.WithCancel(context.Background())
+	cancelled := make(chan error, 1)
+	unsafePayload := "inspect\x1b[2J\nnext"
+	go func() { cancelled <- session.Exec(cancelCtx, []byte(unsafePayload), discardSink{}) }()
+	waitForPendingCount(t, service, 1)
+	cancel()
+	if err := <-cancelled; !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled command returned %v", err)
+	}
+
+	var output bytes.Buffer
+	app := App{Service: service, Output: &output}
+	added, err := app.refreshAuthorizations(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(added) != 8 || len(app.ledger) != 8 {
+		t.Fatalf("authorization count = %d/%d, want 8", len(added), len(app.ledger))
+	}
+	if again, err := app.refreshAuthorizations(context.Background()); err != nil || len(again) != 0 || len(app.ledger) != 8 {
+		t.Fatalf("ledger was not deduplicated: added=%d total=%d err=%v", len(again), len(app.ledger), err)
+	}
+	app.renderAuthorizationLedger()
+	rendered := output.String()
+	for _, required := range []string{
+		"[AUTO APPROVE] codex-1> uptime",
+		"[AUTO APPROVE] codex-1> date",
+		"[AUTO BLOCKED] codex-1> reboot",
+		"[USER APPROVE] codex-1> manual read",
+		"[USER BLOCKED] codex-1> manual block",
+		"[USER APPROVE] codex-1> repeat 123",
+		"[AUTO APPROVE] codex-1> repeat 456",
+		`[CANCELLED] codex-1> inspect\x1b[2J\nnext`,
+	} {
+		if !strings.Contains(rendered, required) {
+			t.Errorf("ledger omitted %q:\n%s", required, rendered)
+		}
+	}
+	if strings.Contains(rendered, `codex-1> "uptime"`) || strings.ContainsRune(rendered, '\x1b') {
+		t.Fatalf("ledger quoted ordinary commands or retained terminal controls: %q", rendered)
+	}
+
+	output.Reset()
+	app.redraw(nil)
+	if !strings.Contains(output.String(), "[USER APPROVE] codex-1> manual read") {
+		t.Fatalf("redraw lost the ledger:\n%s", output.String())
+	}
+	if strings.Contains(output.String(), "private-id") {
+		t.Fatalf("ledger/redraw leaked backend ID: %s", output.String())
 	}
 }
 

@@ -6,7 +6,7 @@ import (
 	"net"
 	"testing"
 
-	"github.com/nethserver/gate/internal/protocol"
+	"github.com/stell0/windmill-gate/internal/protocol"
 )
 
 func TestControlReturnsTargetScopedForwardResource(t *testing.T) {

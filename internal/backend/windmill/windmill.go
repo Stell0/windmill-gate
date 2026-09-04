@@ -14,7 +14,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/nethserver/gate/internal/backend"
+	"github.com/stell0/windmill-gate/internal/backend"
 )
 
 type commandRunner interface {

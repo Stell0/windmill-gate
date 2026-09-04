@@ -24,6 +24,13 @@ cat /proc/sys/fs/file-nr
 findmnt -n -o TARGET --target /home
 ```
 
+When installation order matters, first learn concrete module IDs from inventory,
+then compare only their home-directory metadata with the fixed safe format:
+
+```bash
+stat -c "%n %W %w %Y %y" /home/<module-id> /home/<another-module-id>
+```
+
 Then inspect cluster inventory and host health:
 
 ```bash
@@ -66,6 +73,7 @@ For a rootless module service:
 
 ```bash
 runagent -m <module-id> systemctl --user status <unit>.service --no-pager
+runagent -m <module-id> systemctl --user status {<unit>,<another-unit>}.service --no-pager
 runagent -m <module-id> systemctl --user show <unit>.service --property=ActiveState,SubState,Result,NRestarts,ExecMainStatus,ActiveEnterTimestamp --no-pager
 runagent -m <module-id> journalctl --user -u <unit>.service --no-pager -n 200
 ```
@@ -88,9 +96,45 @@ failed unit as part of diagnosis.
 Read bounded logs and never use `--follow` or `-f`:
 
 ```bash
+api-server-logs logs --entity module --name <module-id> --mode dump --lines 500 --timezone UTC
+ls -lah /var/log
+tail -n 5000 /var/log/messages
+grep -Ein 'error|fatal' /var/log/messages
 runagent -m <module-id> podman logs --tail 200 <container>
 runagent -m <module-id> podman logs --tail 500 --since 1h --timestamps <container>
 ```
+
+Gate validates standalone `ls` paths and recognized read-only options. For
+`cat`, `tail`, `grep`, and `egrep`, every file operand must be a clean lexical
+path under `/var/log`; stdin-only forms, traversal, globs, expansions, unknown
+options, and tail follow controls remain subject to operator review. Large
+non-following tail counts are safe because Gate still enforces its output cap.
+
+Central log queries must use `--mode dump`, at most 1000 lines, syntactically
+safe entity/instance/search values, and optional ISO-8601 `--from`/`--to`
+bounds. If centralized logs are empty or fail, use the bounded journal fallback
+instead of switching to follow mode.
+
+For an exact module-user journal window, resolve the UID first and use either
+UTC timestamp form below. The line limit remains mandatory:
+
+```bash
+journalctl _UID=<numeric-uid> --since=2026-09-03T06:45:00Z --until=2026-09-03T08:30:00Z --no-pager -o short-iso-precise -n 1000
+journalctl _UID=<numeric-uid> --since="2026-09-03 06:45:00 UTC" --until="2026-09-03 08:30:00 UTC" --no-pager -o short-iso-precise -n 1000
+```
+
+When `sqlite3` is installed, the persistent policy permits fixed audit-metadata
+queries over recent tasks, optionally narrowed to the four installation actions
+and one concrete module queue. They deliberately omit task payload data and
+must not end in a semicolon:
+
+```bash
+sqlite3 -readonly -json /var/lib/nethserver/api-server/audit.db "SELECT id,user,json_extract(data,'$.action') AS task_action,json_extract(data,'$.queue') AS task_queue,json_extract(data,'$.timestamp') AS requested_at,timestamp AS audited_at FROM audit WHERE action='create-task' ORDER BY id DESC LIMIT 50"
+```
+
+Process that JSON locally. Arbitrary SQLite statements, alternate database
+paths, audit payload reads, dot commands, and file-reading functions remain
+subject to operator review even with `-readonly`.
 
 Many NS8 containers use the journald log driver, so empty `podman logs` output
 does not prove that the service emitted no logs. Use the module-user journal
@@ -148,10 +192,20 @@ local provider.
 Use exact, read-only commands in the `freepbx` container:
 
 ```bash
-runagent -m <nethvoice-module-id> podman exec freepbx pgrep asterisk
+runagent -m <nethvoice-module-id> podman exec freepbx pgrep -af asterisk
 runagent -m <nethvoice-module-id> podman exec freepbx asterisk -rx 'pjsip show transports'
 runagent -m <nethvoice-module-id> podman exec freepbx asterisk -rx 'pjsip show contacts'
+runagent -m <nethvoice-module-id> podman exec freepbx asterisk -rx 'core show channels concise'
+runagent -m <nethvoice-module-id> podman exec freepbx stat -c '%n %s %y' /etc/asterisk/pjsip.conf /etc/asterisk/extensions.conf
+runagent -m <nethvoice-module-id> podman exec freepbx /usr/bin/mysql --defaults-file=/root/.my.cnf -N --batch asterisk -e "SELECT extension,name FROM users ORDER BY extension LIMIT 100"
 ```
+
+The Asterisk CLI policy accepts only quoted commands beginning with `module
+show`, `core show`, `database show`, or `pjsip show`, plus the existing exact
+`queue show` check. The MySQL form above is parsed as one SELECT over one normal
+table. Joins, unions, subqueries, variables, comments, writes, output/locking
+clauses, unrecognized functions, alternate credentials/options/databases, and
+unsafe shell quoting require an operator decision.
 
 A live Asterisk PID plus configured transports and available contacts establishes
 increasingly stronger evidence: process alive, signaling listeners configured,

@@ -10,14 +10,24 @@ Versions v0.1 through v0.3 are implemented. The code follows the implementation 
 
 - opaque target registry and private Windmill backend mapping;
 - bounded Unix-socket NDJSON protocol and `gate-sh` client;
-- immutable command hashing, conservative policy evaluation, and hash-bound approvals;
-- SQLite audit/history and accessible operator console;
+- immutable command hashing, conservative regex-plus-validator policy evaluation, strict NS8 wrapper views, and hash-bound approvals;
+- SQLite audit/history and an accessible operator console with a current-run authorization ledger;
 - restricted forced-command SSH bridge with fingerprint-to-identity mapping;
 - concurrent targets/clients, cancellation, and target-scoped temporary rules;
 - loopback-only forwards and exact-marker-owned hostname aliases;
-- harness-neutral Gate skills and a tested policy-analysis/PR workflow that stops before merge or deployment.
+- harness-neutral Gate skills and a tested policy-analysis/PR workflow that stops before merge or deployment;
+- tag-driven GitHub releases with checked prebuilt Linux/macOS archives, a
+  no-build installer, repository-scoped Codex skill discovery, and a standalone
+  updater for the external `nethserver-admin` skill bundle.
 
 The Windmill adapter prefers the Sancho command primitives documented in `README.md`. It also supports the deployed Sancho 0.0.1 object-stream format with a constrained, target-scoped nested SSH compatibility path through the Bastion. Items under “Later ideas” remain intentionally deferred.
+
+End-user distribution is hosted at `github.com/stell0/windmill-gate`. A `v*`
+tag tests the project and publishes checksum-protected archives for Linux and
+macOS on AMD64 and ARM64. Release archives include Gate's canonical `skills/`
+content and `.agents/skills` discovery entries. The installer retrieves the
+external NethServer admin skill from `NethServer/agents`; it is not vendored or
+silently persisted into Gate policy.
 
 ## Design constraints
 
@@ -136,9 +146,9 @@ Default result: `ASK`.
 Support:
 
 ```text
-a  approve once
+y  approve once
 s  allow similar command for this target until detach/close
-d  deny
+n  deny
 ```
 
 Do not persist session approvals into the global policy file.

@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nethserver/gate/internal/backend"
-	"github.com/nethserver/gate/internal/storage"
-	"github.com/nethserver/gate/internal/target"
+	"github.com/stell0/windmill-gate/internal/backend"
+	"github.com/stell0/windmill-gate/internal/storage"
+	"github.com/stell0/windmill-gate/internal/target"
 )
 
 type testResolver struct {

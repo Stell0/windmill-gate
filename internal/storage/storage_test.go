@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nethserver/gate/internal/approval"
-	"github.com/nethserver/gate/internal/command"
-	"github.com/nethserver/gate/internal/policy"
-	"github.com/nethserver/gate/internal/target"
+	"github.com/stell0/windmill-gate/internal/approval"
+	"github.com/stell0/windmill-gate/internal/command"
+	"github.com/stell0/windmill-gate/internal/policy"
+	"github.com/stell0/windmill-gate/internal/target"
 )
 
 func TestAuditRecordsSurviveRestartWithoutLeakingBackendID(t *testing.T) {

@@ -9,8 +9,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/nethserver/gate/internal/agent"
-	"github.com/nethserver/gate/internal/protocol"
+	"github.com/stell0/windmill-gate/internal/agent"
+	"github.com/stell0/windmill-gate/internal/protocol"
 	"gopkg.in/yaml.v3"
 )
 

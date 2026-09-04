@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nethserver/gate/internal/protocol"
+	"github.com/stell0/windmill-gate/internal/protocol"
 )
 
 func TestBridgeReplacesClaimedIdentityWithFingerprintMapping(t *testing.T) {

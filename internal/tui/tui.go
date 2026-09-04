@@ -11,9 +11,10 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/nethserver/gate/internal/approval"
-	"github.com/nethserver/gate/internal/backend"
-	gatecore "github.com/nethserver/gate/internal/gate"
+	"github.com/stell0/windmill-gate/internal/approval"
+	"github.com/stell0/windmill-gate/internal/backend"
+	gatecore "github.com/stell0/windmill-gate/internal/gate"
+	"github.com/stell0/windmill-gate/internal/storage"
 )
 
 type App struct {
@@ -26,6 +27,8 @@ type App struct {
 	discovered     []backend.Target
 	singleKeyInput bool
 	terminalOutput bool
+	ledger         []storage.AuthorizationEntry
+	ledgerSeen     map[string]bool
 }
 
 func (a *App) Run(ctx context.Context) error {
@@ -59,8 +62,12 @@ func (a *App) Run(ctx context.Context) error {
 	var pendingCount atomic.Int64
 	go readOperatorLines(ctx, a.Input, a.singleKeyInput, &pendingCount, lines, scanErrors)
 
+	if _, err := a.refreshAuthorizations(ctx); err != nil {
+		return err
+	}
 	a.printBanner()
 	a.renderTargets()
+	a.renderAuthorizationLedger()
 	pending := a.Service.Approvals.List()
 	pendingCount.Store(int64(len(pending)))
 	a.setTerminalTitle(len(pending) > 0)
@@ -91,6 +98,27 @@ func (a *App) Run(ctx context.Context) error {
 			}
 			a.renderPendingItems(pending)
 			promptVisible = false
+		case <-a.Service.AuthorizationChanged():
+			added, err := a.refreshAuthorizations(ctx)
+			if err != nil {
+				fmt.Fprintf(a.Output, "error: %s\n", operatorText(err.Error()))
+				promptVisible = false
+				continue
+			}
+			if len(added) == 0 {
+				continue
+			}
+			pending := a.Service.Approvals.List()
+			pendingCount.Store(int64(len(pending)))
+			a.setTerminalTitle(len(pending) > 0)
+			if a.terminalOutput {
+				a.redraw(pending)
+				displayedPending = pendingSignature(pending)
+			} else {
+				fmt.Fprintln(a.Output)
+				a.renderAuthorizationItems(added)
+			}
+			promptVisible = false
 		case line := <-lines:
 			promptVisible = false
 			line = strings.TrimSpace(line)
@@ -106,9 +134,15 @@ func (a *App) Run(ctx context.Context) error {
 			pendingCount.Store(int64(len(pending)))
 			a.setTerminalTitle(len(pending) > 0)
 			signature := pendingSignature(pending)
-			if err == nil && decisionInput && a.terminalOutput {
-				a.redraw(pending)
-				displayedPending = signature
+			if err == nil && decisionInput {
+				if a.terminalOutput {
+					a.redraw(pending)
+					displayedPending = signature
+				}
+				// The service records the decision immediately after the broker
+				// wakes, then emits AuthorizationChanged. Wait for that audited
+				// event before printing the next prompt.
+				promptVisible = true
 				continue
 			}
 			if signature != displayedPending {
@@ -159,7 +193,7 @@ func readOperatorLines(ctx context.Context, input io.Reader, singleKey bool, pen
 			}
 			swallowLineEnd = false
 		}
-		if singleKey && pendingCount.Load() == 1 && len(current) == 0 && (value == 'a' || value == 's' || value == 'd') {
+		if singleKey && pendingCount.Load() == 1 && len(current) == 0 && (value == 'y' || value == 's' || value == 'n') {
 			if !send(string(value)) {
 				return
 			}
@@ -184,7 +218,7 @@ func readOperatorLines(ctx context.Context, input io.Reader, singleKey bool, pen
 
 func (a *App) printBanner() {
 	fmt.Fprintln(a.Output, "Gate operator console")
-	fmt.Fprintln(a.Output, "Commands: targets, discover, target-add NUMBER, attach AGENT TARGET, agents, approvals, rules, forwards, hosts, a|s|d [COMMAND], history, cancel COMMAND, detach TARGET, quit")
+	fmt.Fprintln(a.Output, "Commands: targets, discover, target-add NUMBER, attach AGENT TARGET, agents, approvals, rules, forwards, hosts, y|s|n [COMMAND], history, cancel COMMAND, detach TARGET, quit")
 }
 
 func (a *App) renderTargets() {
@@ -231,7 +265,7 @@ func (a *App) renderPendingItems(pending []approval.Pending) {
 		if len(pending) == 1 && a.singleKeyInput {
 			guidance = "single key; no Enter required"
 		}
-		fmt.Fprintf(a.Output, "  [a] approve once  [s] allow similar for target until detach  [d] deny  (%s)\n", guidance)
+		fmt.Fprintf(a.Output, "  Approve? [y] once  [s] similar for target until detach  [n] deny  (%s)\n", guidance)
 	}
 }
 
@@ -239,6 +273,7 @@ func (a *App) redraw(pending []approval.Pending) {
 	fmt.Fprint(a.Output, "\x1b[2J\x1b[H")
 	a.printBanner()
 	a.renderTargets()
+	a.renderAuthorizationLedger()
 	a.renderPendingItems(pending)
 }
 
@@ -258,7 +293,7 @@ func isDecisionInput(line string) bool {
 	if len(fields) < 1 || len(fields) > 2 {
 		return false
 	}
-	return fields[0] == "a" || fields[0] == "s" || fields[0] == "d"
+	return fields[0] == "y" || fields[0] == "s" || fields[0] == "n"
 }
 
 func pendingSignature(pending []approval.Pending) string {
@@ -349,7 +384,10 @@ func (a *App) handle(ctx context.Context, line string) (bool, error) {
 			return false, err
 		}
 		fmt.Fprintf(a.Output, "attached %s to %s for new sessions\n", fields[1], fields[2])
-	case "a", "s", "d":
+	case "y", "s", "n":
+		if len(fields) > 2 {
+			return false, errors.New("usage: y|s|n [COMMAND]")
+		}
 		return false, a.decide(fields[0], optional(fields, 1))
 	case "history":
 		entries, err := a.Service.Store.History(ctx, "", 50)
@@ -401,6 +439,49 @@ func operatorText(value string) string {
 	return strconv.QuoteToGraphic(value)
 }
 
+func ledgerText(value string) string {
+	quoted := strconv.QuoteToGraphic(value)
+	if len(quoted) >= 2 {
+		return quoted[1 : len(quoted)-1]
+	}
+	return quoted
+}
+
+func (a *App) refreshAuthorizations(ctx context.Context) ([]storage.AuthorizationEntry, error) {
+	entries, err := a.Service.Store.AuthorizationsSince(ctx, a.Service.StartedAt())
+	if err != nil {
+		return nil, err
+	}
+	if a.ledgerSeen == nil {
+		a.ledgerSeen = make(map[string]bool)
+	}
+	var added []storage.AuthorizationEntry
+	for _, entry := range entries {
+		if a.ledgerSeen[entry.CommandID] {
+			continue
+		}
+		a.ledgerSeen[entry.CommandID] = true
+		a.ledger = append(a.ledger, entry)
+		added = append(added, entry)
+	}
+	return added, nil
+}
+
+func (a *App) renderAuthorizationLedger() {
+	fmt.Fprintln(a.Output, "\nAUTHORIZATIONS (CURRENT RUN)")
+	if len(a.ledger) == 0 {
+		fmt.Fprintln(a.Output, "  (none)")
+		return
+	}
+	a.renderAuthorizationItems(a.ledger)
+}
+
+func (a *App) renderAuthorizationItems(entries []storage.AuthorizationEntry) {
+	for _, entry := range entries {
+		fmt.Fprintf(a.Output, "  [%s] %s> %s\n", entry.Label, ledgerText(entry.AgentIdentity), ledgerText(entry.Command))
+	}
+}
+
 func (a *App) renderTemporaryRules() {
 	fmt.Fprintln(a.Output, "\nTARGET-SCOPED TEMPORARY ALLOWS")
 	count := 0
@@ -437,11 +518,11 @@ func (a *App) decide(action, commandID string) error {
 	}
 	decision := approval.Decision{CommandID: item.Command.ID, Hash: item.Command.Hash, Actor: a.Operator}
 	switch action {
-	case "a":
+	case "y":
 		decision.Action = approval.ApproveOnce
 	case "s":
 		decision.Action = approval.AllowTarget
-	case "d":
+	case "n":
 		decision.Action = approval.Deny
 	}
 	return a.Service.Approvals.Decide(decision)

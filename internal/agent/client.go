@@ -10,7 +10,7 @@ import (
 	"os/exec"
 	"sync"
 
-	"github.com/nethserver/gate/internal/protocol"
+	"github.com/stell0/windmill-gate/internal/protocol"
 )
 
 type Dialer func(ctx context.Context) (io.ReadWriteCloser, error)

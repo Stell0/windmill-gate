@@ -3,9 +3,9 @@ package review
 import (
 	"testing"
 
-	"github.com/nethserver/gate/internal/command"
-	"github.com/nethserver/gate/internal/policy"
-	"github.com/nethserver/gate/internal/storage"
+	"github.com/stell0/windmill-gate/internal/command"
+	"github.com/stell0/windmill-gate/internal/policy"
+	"github.com/stell0/windmill-gate/internal/storage"
 )
 
 func TestAnalyzeRequiresRepeatedCrossContextManualApprovals(t *testing.T) {

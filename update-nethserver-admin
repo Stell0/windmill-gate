@@ -1,0 +1,43 @@
+#!/bin/sh
+
+set -eu
+
+gate_root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+gate_skill_dir="$gate_root/.agents/skills"
+gate_skill_url="${GATE_NETHSERVER_SKILL_URL:-https://codeload.github.com/NethServer/agents/tar.gz/refs/heads/main}"
+gate_tmp_dir=$(mktemp -d "${TMPDIR:-/tmp}/gate-skill-update.XXXXXX")
+trap 'rm -rf "$gate_tmp_dir"' EXIT HUP INT TERM
+
+if ! command -v curl >/dev/null 2>&1; then
+	printf '%s\n' "Skill updater: curl is required" >&2
+	exit 1
+fi
+if ! command -v tar >/dev/null 2>&1; then
+	printf '%s\n' "Skill updater: tar is required" >&2
+	exit 1
+fi
+
+printf '%s\n' "Downloading nethserver-admin from NethServer/agents..."
+curl -fsSL "$gate_skill_url" -o "$gate_tmp_dir/agents.tar.gz"
+tar -xzf "$gate_tmp_dir/agents.tar.gz" \
+	-C "$gate_tmp_dir" \
+	--strip-components=2 \
+	agents-main/skills/nethserver-admin
+
+if [ ! -f "$gate_tmp_dir/nethserver-admin/SKILL.md" ]; then
+	printf '%s\n' "Skill updater: downloaded bundle is invalid" >&2
+	exit 1
+fi
+
+mkdir -p "$gate_skill_dir"
+if [ -e "$gate_skill_dir/nethserver-admin" ] || [ -L "$gate_skill_dir/nethserver-admin" ]; then
+	mv "$gate_skill_dir/nethserver-admin" "$gate_tmp_dir/previous-nethserver-admin"
+fi
+if ! mv "$gate_tmp_dir/nethserver-admin" "$gate_skill_dir/nethserver-admin"; then
+	if [ -e "$gate_tmp_dir/previous-nethserver-admin" ] || [ -L "$gate_tmp_dir/previous-nethserver-admin" ]; then
+		mv "$gate_tmp_dir/previous-nethserver-admin" "$gate_skill_dir/nethserver-admin"
+	fi
+	exit 1
+fi
+
+printf '%s\n' "Updated $gate_skill_dir/nethserver-admin"

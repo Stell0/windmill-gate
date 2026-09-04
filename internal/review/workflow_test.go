@@ -11,7 +11,7 @@ import (
 )
 
 func TestApplyCandidatesAddsRulesAndBoundaryTests(t *testing.T) {
-	policyData := []byte("allow: []\ndeny:\n  - '^systemctl restart\\\\b'\n")
+	policyData := []byte("validated_allow:\n  - regexp: '^pgrep(?: .*)?$'\n    validator: diagnostic_read\nallow: []\ndeny:\n  - '^systemctl restart\\\\b'\n")
 	testsData := []byte("allow: []\nask: []\ndeny: []\n")
 	candidate := Candidate{
 		Pattern:       `^grep timeout /var/log/messages$`,
@@ -24,6 +24,9 @@ func TestApplyCandidatesAddsRulesAndBoundaryTests(t *testing.T) {
 	}
 	if !strings.Contains(string(updatedPolicy), candidate.Pattern) || !strings.Contains(string(updatedTests), "--unexpected") {
 		t.Fatalf("proposal omitted rule or tests:\n%s\n%s", updatedPolicy, updatedTests)
+	}
+	if !strings.Contains(string(updatedPolicy), "validated_allow:") || !strings.Contains(string(updatedPolicy), "validator: diagnostic_read") {
+		t.Fatalf("proposal discarded validated rules:\n%s", updatedPolicy)
 	}
 }
 

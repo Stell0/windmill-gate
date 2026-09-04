@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/nethserver/gate/internal/command"
-	"github.com/nethserver/gate/internal/policy"
+	"github.com/stell0/windmill-gate/internal/command"
+	"github.com/stell0/windmill-gate/internal/policy"
 )
 
 type Action string

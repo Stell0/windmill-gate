@@ -1,4 +1,4 @@
-module github.com/nethserver/gate
+module github.com/stell0/windmill-gate
 
 go 1.25.0
 
