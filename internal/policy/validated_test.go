@@ -145,6 +145,35 @@ func TestUIDJournalValidatorChecksDatesOrderAndBounds(t *testing.T) {
 	}
 }
 
+func TestValidatedRTPengineReadChecksWrapperAndSingleSessionScope(t *testing.T) {
+	engine, err := New(Config{ValidatedAllow: []ValidatedRule{{
+		Regexp: `^runagent -m nethvoice-proxy[0-9]+ podman exec rtpengine rtpengine-ctl(?: .*)?$`, Validator: "rtpengine_read",
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := map[string]Decision{
+		`runagent -m nethvoice-proxy1 podman exec rtpengine rtpengine-ctl --help`:                                             Allow,
+		`runagent -m nethvoice-proxy42 podman exec rtpengine rtpengine-ctl list sessions call-00000001@example.invalid`:       Allow,
+		`runagent -m nethvoice-proxy42 podman exec rtpengine rtpengine-ctl list sessions 12345`:                               Ask,
+		`runagent -m nethvoice-proxy42 podman exec rtpengine rtpengine-ctl list sessions all`:                                 Ask,
+		`runagent -m nethvoice-proxy42 podman exec rtpengine rtpengine-ctl list sessions own`:                                 Ask,
+		`runagent -m nethvoice-proxy42 podman exec rtpengine rtpengine-ctl list sessions foreign`:                             Ask,
+		`runagent -m nethvoice-proxy42 podman exec rtpengine rtpengine-ctl list sessions abcdefgh`:                            Ask,
+		`runagent -m nethvoice-proxy42 podman exec rtpengine rtpengine-ctl list sessions '12345'`:                             Ask,
+		`runagent -m nethvoice-proxy42 podman exec rtpengine rtpengine-ctl list sessions call-00000001@example.invalid extra`: Ask,
+		`runagent -m nethvoice42 podman exec rtpengine rtpengine-ctl list sessions call-00000001@example.invalid`:             Ask,
+		`runagent -m nethvoice-proxy42 podman exec other rtpengine-ctl list sessions call-00000001@example.invalid`:           Ask,
+		`runagent -m nethvoice-proxy42 podman exec rtpengine rtpengine-ctl terminate call-00000001@example.invalid`:           Ask,
+		`runagent -m nethvoice-proxy42 podman exec rtpengine rtpengine-ctl set timeout 30`:                                    Ask,
+	}
+	for command, expected := range tests {
+		if actual := engine.Evaluate("gt_test", command).Decision; actual != expected {
+			t.Errorf("Evaluate(%q) = %s, want %s", command, actual, expected)
+		}
+	}
+}
+
 func TestValidatedAllowRejectsUnknownValidator(t *testing.T) {
 	if _, err := New(Config{ValidatedAllow: []ValidatedRule{{Regexp: `^x$`, Validator: "unknown"}}}); err == nil {
 		t.Fatal("unknown validator was accepted")

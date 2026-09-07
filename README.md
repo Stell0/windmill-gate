@@ -123,8 +123,8 @@ Unknown commands always produce `ASK`.
 The bundled policy automatically allows only narrow, read-only diagnostics. It
 uses regular expressions and semantic validators for commands such as bounded
 journal reads, safe log inspection, process inspection, selected Asterisk
-commands, and a constrained MySQL `SELECT` form. Dangerous matches produce
-`DENY`.
+commands, scoped single-session RTPengine reads, and a constrained MySQL
+`SELECT` form. Dangerous matches produce `DENY`.
 
 Persistent policy can inspect commands inside these strict NS8 wrappers:
 

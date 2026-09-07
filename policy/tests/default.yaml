@@ -193,6 +193,10 @@ allow:
     expect: ALLOW
   - command: "runagent -m nethvoice1 podman exec freepbx stat -c '%n %s %y' /etc/asterisk/extensions.conf /etc/asterisk/pjsip.conf"
     expect: ALLOW
+  - command: "runagent -m nethvoice-proxy7 podman exec rtpengine rtpengine-ctl --help"
+    expect: ALLOW
+  - command: "runagent -m nethvoice-proxy7 podman exec rtpengine rtpengine-ctl list sessions call-00000001@example.invalid"
+    expect: ALLOW
 
 ask:
   - command: "journalctl -u redis --follow"
@@ -355,17 +359,23 @@ ask:
     expect: ASK
   - command: "runagent -m nethvoice-proxy7 podman exec rtpengine rtpengine-ctl list sessions all"
     expect: ASK
-  - command: "runagent -m nethvoice-proxy7 podman exec rtpengine rtpengine-ctl --help"
-    expect: ASK
-  - command: "runagent -m nethvoice-proxy7 podman exec rtpengine rtpengine-ctl list sessions call-00000001@example.invalid"
-    expect: ASK
   - command: "runagent -m nethvoice-proxy7 podman exec rtpengine rtpengine-ctl list sessions own"
+    expect: ASK
+  - command: "runagent -m nethvoice-proxy7 podman exec rtpengine rtpengine-ctl list sessions foreign"
+    expect: ASK
+  - command: "runagent -m nethvoice-proxy7 podman exec rtpengine rtpengine-ctl list sessions abcdefgh"
+    expect: ASK
+  - command: "runagent -m nethvoice-proxy7 podman exec rtpengine rtpengine-ctl list sessions 12345"
+    expect: ASK
+  - command: "runagent -m nethvoice-proxy7 podman exec rtpengine rtpengine-ctl list sessions '12345'"
     expect: ASK
   - command: "runagent -m nethvoice-proxy7 podman exec rtpengine rtpengine-ctl list sessions call-00000001@example.invalid extra"
     expect: ASK
   - command: "runagent -m nethvoice58 podman exec rtpengine rtpengine-ctl list sessions call-00000001@example.invalid"
     expect: ASK
   - command: "runagent -m nethvoice-proxy7 podman exec rtpengine rtpengine-ctl terminate call-00000001@example.invalid"
+    expect: ASK
+  - command: "runagent -m nethvoice-proxy7 podman exec rtpengine rtpengine-ctl set timeout 30"
     expect: ASK
 
 deny:

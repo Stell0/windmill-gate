@@ -9,6 +9,7 @@ import (
 var validators = map[string]func([]shellWord) bool{
 	"diagnostic_read": validateDiagnosticRead,
 	"mysql_select":    validateMySQLSelect,
+	"rtpengine_read":  validateRTPengineRead,
 	"uid_journal":     validateUIDJournal,
 }
 
