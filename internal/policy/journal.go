@@ -7,7 +7,7 @@ import (
 )
 
 func validateUIDJournal(words []shellWord) bool {
-	if len(words) != 9 || words[0].value != "journalctl" ||
+	if (len(words) != 9 && len(words) != 11) || words[0].value != "journalctl" ||
 		!strings.HasPrefix(words[1].value, "_UID=") ||
 		!strings.HasPrefix(words[2].value, "--since=") ||
 		!strings.HasPrefix(words[3].value, "--until=") ||
@@ -28,7 +28,32 @@ func validateUIDJournal(words []shellWord) bool {
 		return false
 	}
 	until, ok := utcTimestamp(strings.TrimPrefix(words[3].value, "--until="))
-	return ok && !until.Before(since)
+	if !ok || until.Before(since) {
+		return false
+	}
+	if len(words) == 11 {
+		return words[9].value == "-g" && boundedJournalMatch(words[10].value)
+	}
+	return true
+}
+
+func boundedJournalMatch(value string) bool {
+	if len(value) < 3 || len(value) > 256 || (!asciiLetter(value[0]) && !asciiDigit(value[0])) {
+		return false
+	}
+	decimalOnly := asciiDigit(value[0])
+	hasDigit := decimalOnly
+	hasNonDigit := !decimalOnly
+	for index := 1; index < len(value); index++ {
+		character := value[index]
+		if !asciiLetter(character) && !asciiDigit(character) && !strings.ContainsRune("._:@-", rune(character)) {
+			return false
+		}
+		decimalOnly = decimalOnly && asciiDigit(character)
+		hasDigit = hasDigit || asciiDigit(character)
+		hasNonDigit = hasNonDigit || !asciiDigit(character)
+	}
+	return decimalOnly || (len(value) >= 8 && hasDigit && hasNonDigit)
 }
 
 func utcTimestamp(value string) (time.Time, bool) {

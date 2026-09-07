@@ -12,7 +12,7 @@ validated_allow:
     validator: diagnostic_read
   - regexp: '^/usr/bin/mysql(?: .*)?$'
     validator: mysql_select
-  - regexp: '^journalctl _UID=[^ ]+ --since=.+ --until=.+ --no-pager -o short-iso-precise -n [^ ]+$'
+  - regexp: '^journalctl _UID=[^ ]+ --since=.+ --until=.+ --no-pager -o short-iso-precise -n [^ ]+(?: -g [^ ]+)?$'
     validator: uid_journal
 
 allow:

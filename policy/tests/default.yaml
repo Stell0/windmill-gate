@@ -49,6 +49,10 @@ allow:
     expect: ALLOW
   - command: "journalctl _UID=1020 --since=\"2026-09-03 06:45:00 UTC\" --until=\"2026-09-03 08:30:00 UTC\" --no-pager -o short-iso-precise -n 500"
     expect: ALLOW
+  - command: "journalctl _UID=1020 --since=\"2026-09-03 06:45:00 UTC\" --until=\"2026-09-03 08:30:00 UTC\" --no-pager -o short-iso-precise -n 1000 -g 00000000-0000-4000-8000-000000000001@example.invalid"
+    expect: ALLOW
+  - command: "journalctl _UID=1020 --since=\"2026-09-03 06:45:00 UTC\" --until=\"2026-09-03 08:30:00 UTC\" --no-pager -o short-iso-precise -n 1000 -g 12345"
+    expect: ALLOW
   - command: "journalctl -u api-server --no-pager -n 200"
     expect: ALLOW
   - command: "stat -c \"%n %W %w %Y %y\" /home/traefik1 /home/nethvoice42"
@@ -215,6 +219,14 @@ ask:
     expect: ASK
   - command: "journalctl _UID=1020 --since=2026-09-03T06:45:00Z --until=2026-09-03T08:30:00Z --no-pager -o short-iso-precise -n 1001"
     expect: ASK
+  - command: "journalctl _UID=1020 --since=2026-09-03T06:45:00Z --until=2026-09-03T08:30:00Z --no-pager -o short-iso-precise -n 1000 -g all"
+    expect: ASK
+  - command: "journalctl _UID=1020 --since=2026-09-03T06:45:00Z --until=2026-09-03T08:30:00Z --no-pager -o short-iso-precise -n 1000 -g call"
+    expect: ASK
+  - command: "journalctl _UID=1020 --since=2026-09-03T06:45:00Z --until=2026-09-03T08:30:00Z --no-pager -o short-iso-precise -n 1000 -g abcdefgh"
+    expect: ASK
+  - command: "journalctl _UID=1020 --since=2026-09-03T06:45:00Z --until=2026-09-03T08:30:00Z --no-pager -o short-iso-precise -n 1000 -g '.*'"
+    expect: ASK
   - command: "stat -c \"%n %W %w %Y %y\" /etc/shadow"
     expect: ASK
   - command: "stat -c '%n %W %w %Y %y' /home/nethvoice45/../root"
@@ -340,6 +352,20 @@ ask:
   - command: "runagent -m nethvoice1 podman exec freepbx asterisk -rx 'database put AMPUSER 100 secret'"
     expect: ASK
   - command: "runagent -m nethvoice1 podman exec freepbx stat -c '%n %s %y' /etc/asterisk/../shadow"
+    expect: ASK
+  - command: "runagent -m nethvoice-proxy7 podman exec rtpengine rtpengine-ctl list sessions all"
+    expect: ASK
+  - command: "runagent -m nethvoice-proxy7 podman exec rtpengine rtpengine-ctl --help"
+    expect: ASK
+  - command: "runagent -m nethvoice-proxy7 podman exec rtpengine rtpengine-ctl list sessions call-00000001@example.invalid"
+    expect: ASK
+  - command: "runagent -m nethvoice-proxy7 podman exec rtpengine rtpengine-ctl list sessions own"
+    expect: ASK
+  - command: "runagent -m nethvoice-proxy7 podman exec rtpengine rtpengine-ctl list sessions call-00000001@example.invalid extra"
+    expect: ASK
+  - command: "runagent -m nethvoice58 podman exec rtpengine rtpengine-ctl list sessions call-00000001@example.invalid"
+    expect: ASK
+  - command: "runagent -m nethvoice-proxy7 podman exec rtpengine rtpengine-ctl terminate call-00000001@example.invalid"
     expect: ASK
 
 deny:

@@ -126,11 +126,17 @@ func TestUIDJournalValidatorChecksDatesOrderAndBounds(t *testing.T) {
 		t.Fatal(err)
 	}
 	tests := map[string]Decision{
-		`journalctl _UID=1020 --since=2026-09-03T06:45:00Z --until=2026-09-03T08:30:00Z --no-pager -o short-iso-precise -n 1000`:          Allow,
-		`journalctl _UID=1020 --since="2026-09-03 06:45:00 UTC" --until="2026-09-03 08:30:00 UTC" --no-pager -o short-iso-precise -n 500`: Allow,
-		`journalctl _UID=1020 --since=2026-13-03T06:45:00Z --until=2026-09-03T08:30:00Z --no-pager -o short-iso-precise -n 1000`:          Ask,
-		`journalctl _UID=1020 --since=2026-09-03T09:45:00Z --until=2026-09-03T08:30:00Z --no-pager -o short-iso-precise -n 1000`:          Ask,
-		`journalctl _UID=1020 --since=2026-09-03T06:45:00Z --until=2026-09-03T08:30:00Z --no-pager -o short-iso-precise -n 1001`:          Ask,
+		`journalctl _UID=1020 --since=2026-09-03T06:45:00Z --until=2026-09-03T08:30:00Z --no-pager -o short-iso-precise -n 1000`:                                                                  Allow,
+		`journalctl _UID=1020 --since="2026-09-03 06:45:00 UTC" --until="2026-09-03 08:30:00 UTC" --no-pager -o short-iso-precise -n 500`:                                                         Allow,
+		`journalctl _UID=1020 --since="2026-09-03 06:45:00 UTC" --until="2026-09-03 08:30:00 UTC" --no-pager -o short-iso-precise -n 500 -g 00000000-0000-4000-8000-000000000001@example.invalid`: Allow,
+		`journalctl _UID=1020 --since=2026-09-03T06:45:00Z --until=2026-09-03T08:30:00Z --no-pager -o short-iso-precise -n 1000 -g 12345`:                                                         Allow,
+		`journalctl _UID=1020 --since=2026-13-03T06:45:00Z --until=2026-09-03T08:30:00Z --no-pager -o short-iso-precise -n 1000`:                                                                  Ask,
+		`journalctl _UID=1020 --since=2026-09-03T09:45:00Z --until=2026-09-03T08:30:00Z --no-pager -o short-iso-precise -n 1000`:                                                                  Ask,
+		`journalctl _UID=1020 --since=2026-09-03T06:45:00Z --until=2026-09-03T08:30:00Z --no-pager -o short-iso-precise -n 1001`:                                                                  Ask,
+		`journalctl _UID=1020 --since=2026-09-03T06:45:00Z --until=2026-09-03T08:30:00Z --no-pager -o short-iso-precise -n 1000 -g all`:                                                           Ask,
+		`journalctl _UID=1020 --since=2026-09-03T06:45:00Z --until=2026-09-03T08:30:00Z --no-pager -o short-iso-precise -n 1000 -g call`:                                                          Ask,
+		`journalctl _UID=1020 --since=2026-09-03T06:45:00Z --until=2026-09-03T08:30:00Z --no-pager -o short-iso-precise -n 1000 -g abcdefgh`:                                                      Ask,
+		`journalctl _UID=1020 --since=2026-09-03T06:45:00Z --until=2026-09-03T08:30:00Z --no-pager -o short-iso-precise -n 1000 -g '.*'`:                                                          Ask,
 	}
 	for command, expected := range tests {
 		if actual := engine.Evaluate("gt_test", command).Decision; actual != expected {
