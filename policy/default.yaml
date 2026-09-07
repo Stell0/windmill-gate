@@ -14,6 +14,10 @@ validated_allow:
     validator: mysql_select
   - regexp: '^journalctl _UID=[^ ]+ --since=.+ --until=.+ --no-pager -o short-iso-precise -n [^ ]+(?: -g [^ ]+)?$'
     validator: uid_journal
+  # Keep RTPengine access on the exact proxy/container boundary. The validator
+  # admits help and one bounded Call-ID lookup, never aggregate or control verbs.
+  - regexp: '^runagent -m nethvoice-proxy[0-9]+ podman exec rtpengine rtpengine-ctl(?: .*)?$'
+    validator: rtpengine_read
 
 allow:
   # Basic host identity and capacity checks; optional arguments remain explicit.
