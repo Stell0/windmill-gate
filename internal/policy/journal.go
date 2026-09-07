@@ -42,14 +42,18 @@ func boundedJournalMatch(value string) bool {
 		return false
 	}
 	decimalOnly := asciiDigit(value[0])
+	hasDigit := decimalOnly
+	hasNonDigit := !decimalOnly
 	for index := 1; index < len(value); index++ {
 		character := value[index]
 		if !asciiLetter(character) && !asciiDigit(character) && !strings.ContainsRune("._:@-", rune(character)) {
 			return false
 		}
 		decimalOnly = decimalOnly && asciiDigit(character)
+		hasDigit = hasDigit || asciiDigit(character)
+		hasNonDigit = hasNonDigit || !asciiDigit(character)
 	}
-	return decimalOnly || len(value) >= 8
+	return decimalOnly || (len(value) >= 8 && hasDigit && hasNonDigit)
 }
 
 func utcTimestamp(value string) (time.Time, bool) {

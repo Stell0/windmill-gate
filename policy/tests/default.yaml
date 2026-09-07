@@ -223,6 +223,8 @@ ask:
     expect: ASK
   - command: "journalctl _UID=1020 --since=2026-09-03T06:45:00Z --until=2026-09-03T08:30:00Z --no-pager -o short-iso-precise -n 1000 -g call"
     expect: ASK
+  - command: "journalctl _UID=1020 --since=2026-09-03T06:45:00Z --until=2026-09-03T08:30:00Z --no-pager -o short-iso-precise -n 1000 -g abcdefgh"
+    expect: ASK
   - command: "journalctl _UID=1020 --since=2026-09-03T06:45:00Z --until=2026-09-03T08:30:00Z --no-pager -o short-iso-precise -n 1000 -g '.*'"
     expect: ASK
   - command: "stat -c \"%n %W %w %Y %y\" /etc/shadow"
