@@ -2,62 +2,95 @@
 
 # Windmill Gate
 
-Gate lets an AI agent inspect a production system while a human stays in
+Gate lets an AI agent inspect a production system without giving up human
 control.
 
-The operator selects the remote target. The agent submits one command at a
-time. Gate automatically allows safe diagnostics, asks the operator about
-unknown commands, blocks dangerous commands, and records every decision.
+The operator starts Gate and selects a remote target. The agent then submits
+one command at a time. Gate allows known safe diagnostics, asks the operator
+about unknown commands, blocks dangerous commands, and records every decision.
 
-## Start in three steps
+Gate uses your existing Bastion, Sancho, and Windmill connection. It does not
+give the agent production credentials or an unrestricted remote shell.
 
-You do **not** need Go, a compiler, or a developer environment.
+## Quick start
 
-You need:
+You need SSH access to a Bastion where Sancho is installed. Gate itself is a
+prebuilt binary, so Go and a compiler are not required. Install
+[Codex](https://developers.openai.com/codex/cli) if you want to use the example
+agent workflow below.
 
-- Linux or macOS with `curl`, `tar`, and `ssh`, or Windows with PowerShell and
-  the OpenSSH client;
-- SSH access to your Bastion;
-- Sancho installed on the Bastion;
-- [Codex](https://developers.openai.com/codex/cli) if you want to use the
-  included agent skills.
+### Linux or macOS
 
-### 1. Download Gate
+Install Gate:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/stell0/windmill-gate/main/install.sh | sh
 cd windmill-gate
 ```
 
-On Windows, use PowerShell:
+Start Gate in the operator terminal, replacing the example Bastion address:
+
+```bash
+./gate --bastion operator@bastion.example --agent codex-1
+```
+
+Choose a target when prompted and leave this terminal open. Then open a second
+terminal, enter the Gate installation directory, and start Codex:
+
+```bash
+cd windmill-gate
+codex
+```
+
+### Windows
+
+Windows requires PowerShell and the OpenSSH client. Install Gate from
+PowerShell:
 
 ```powershell
 irm https://raw.githubusercontent.com/stell0/windmill-gate/main/install.ps1 | iex
 Set-Location windmill-gate
 ```
 
-The installer downloads the latest prebuilt binary for the current platform,
-checks its SHA-256 checksum, and installs the Gate and NethServer skills. It
-does not compile anything.
-
-### 2. Start Gate
-
-In the operator terminal, replace the example Bastion address:
-
-```bash
-./gate --bastion operator@bastion.example --agent codex-1 --session <session id>
-```
-
-On Windows, run the equivalent command in PowerShell:
+Start Gate in the operator terminal, replacing the example Bastion address:
 
 ```powershell
-.\gate.exe --bastion operator@bastion.example --agent codex-1 --session <session-id>
+.\gate.exe --bastion operator@bastion.example --agent codex-1
 ```
 
-And leave this terminal open.
+Choose a target when prompted and leave this terminal open. Then open a second
+PowerShell window, enter the Gate installation directory, and start Codex:
 
+```powershell
+Set-Location windmill-gate
+codex
+```
 
-When a command needs a decision, press:
+### Use Gate with Codex
+
+A good first prompt for an NS8 investigation is:
+
+```text
+Use $nethserver-admin for NethServer knowledge and $gate-remote-shell with
+agent identity codex-1 for every production command. Inspect the system health.
+```
+
+Codex automatically finds the installed skills in `.agents/skills`. If you
+want to verify Gate without an agent, submit a harmless command directly:
+
+Linux or macOS:
+
+```bash
+./gate-sh --agent codex-1 -c 'uname -a'
+```
+
+Windows:
+
+```powershell
+.\gate-sh.exe --agent codex-1 -c "uname -a"
+```
+
+When a command needs a decision, use the Gate operator terminal:
 
 ```text
 y   approve this command once
@@ -65,114 +98,113 @@ s   approve similar commands for this target until it disconnects
 n   block this command
 ```
 
-### 3. Start Codex
+Gate is now ready for agent-assisted diagnostics.
 
-Open another terminal in the same directory:
-
-```bash
-cd windmill-gate
-codex
-```
-
-For an NS8 investigation, a good first prompt is:
-
-```text
-Use $nethserver-admin for NethServer knowledge and $gate-remote-shell with
-agent identity codex-1 for every production command. Inspect the system health.
-```
-
-Codex automatically finds the skills in `.agents/skills`. You can also test
-Gate without an agent:
-
-```bash
-./gate-sh --agent codex-1 -c 'uname -a'
-```
-
-On Windows:
-
-```powershell
-.\gate-sh.exe --agent codex-1 -c 'uname -a'
-```
-
-## Skills
+## Included skills
 
 The release includes three Gate skills:
 
-- `gate-remote-shell` — run small, non-interactive production commands through
-  Gate;
-- `gate-port-forward` — inspect target HTTP/HTTPS services through controlled
-  local forwards;
-- `gate-policy-review` — propose narrow policy improvements through a pull
-  request, without merging or deploying them.
+- `gate-remote-shell` runs small, non-interactive production commands through
+  Gate.
+- `gate-port-forward` provides controlled access to target HTTP/HTTPS services.
+- `gate-policy-review` proposes narrow policy improvements in a pull request;
+  it never merges or deploys them.
 
-The installer also retrieves
-[`nethserver-admin`](https://github.com/NethServer/agents/tree/main/skills/nethserver-admin),
-including all of its reference files. It gives the agent the NS8 administration
-knowledge needed for useful diagnostics. Gate still controls how its suggested
-commands reach production.
+The installer also downloads the
+[`nethserver-admin`](https://github.com/NethServer/agents/tree/main/skills/nethserver-admin)
+skill for NS8 administration knowledge. Gate remains responsible for deciding
+whether its suggested commands can run.
 
-Retrieve the skill again or update it at any time with:
+Update that skill at any time:
 
 ```bash
 ./update-nethserver-admin
 ```
 
-On Windows, use `.\update-nethserver-admin.ps1`.
+On Windows, run `.\update-nethserver-admin.ps1` from PowerShell. Restart Codex
+if an updated skill does not appear; `/skills` lists the available skills.
 
-If Codex was already running, restart it if the updated skill does not appear.
-Use `/skills` inside Codex to see the available skills.
+## Common commands
 
-## What Gate does
+The examples below use Linux/macOS syntax. On Windows, replace `./gate` with
+`.\gate.exe`.
 
-For every submitted command, Gate:
+Inspect command history:
 
-1. keeps the exact command bytes and calculates their hash;
-2. evaluates the command as `ALLOW`, `ASK`, or `DENY`;
-3. asks the operator when the result is `ASK`;
-4. verifies that the approved bytes did not change;
-5. runs the command through the existing Bastion/Windmill/Sancho connection;
-6. returns stdout, stderr, and the remote exit code to the agent;
-7. stores the command, decision, and result in a local SQLite audit database.
-
-Gate is not an unrestricted remote shell. It does not give agents production
-credentials, expose private Windmill session IDs, let agents choose arbitrary
-targets, or silently make temporary approvals permanent.
-
-## How Gate decides
-
-Unknown commands always produce `ASK`.
-
-The bundled policy automatically allows only narrow, read-only diagnostics. It
-uses regular expressions and semantic validators for commands such as bounded
-journal reads, safe log inspection, process inspection, selected Asterisk
-commands, scoped single-session RTPengine reads, and a constrained MySQL
-`SELECT` form. Dangerous matches produce `DENY`.
-
-Persistent policy can inspect commands inside these strict NS8 wrappers:
-
-```text
-runagent -m MODULE COMMAND
-runagent -m MODULE podman exec CONTAINER COMMAND
+```bash
+./gate history
 ```
 
-Classification never rewrites the command. Malformed quoting, shell expansion,
-shell composition, unsafe options, and unmatched commands remain `ASK` unless a
-deny rule matches.
+Create, inspect, and remove a controlled web-service forward:
 
-The operator console records authorization as it happens:
-
-```text
-[AUTO APPROVE] agent> command
-[AUTO BLOCKED] agent> command
-[USER APPROVE] agent> command
-[USER BLOCKED] agent> command
-[CANCELLED] agent> command
+```bash
+./gate forward add --agent codex-1 --remote-port 443
+./gate forward list --agent codex-1
+./gate forward remove --agent codex-1 fw_EXAMPLE
 ```
 
-These labels describe authorization, not whether the remote command succeeded.
-Exit status and output remain available in history.
+Create, inspect, and remove a hostname-sensitive HTTPS alias:
 
-## Architecture
+```bash
+./gate host add --agent codex-1 --remote-port 443 foo.example.com
+./gate host list --agent codex-1
+./gate host remove --agent codex-1 foo.example.com
+```
+
+On Windows, hostname aliases require an elevated terminal because Gate must
+update the system hosts file. Port forwarding itself does not require
+elevation.
+
+Run Gate without the interactive operator console:
+
+```bash
+./gate daemon --bastion operator@bastion.example --agent codex-1
+```
+
+Daemon mode cannot approve `ASK` commands. Use it only when policy already
+handles every expected command.
+
+---
+
+## Technical reference
+
+The rest of this document explains Gate's security model and internals. It is
+not required for everyday use.
+
+### Security model
+
+Every command follows one auditable path:
+
+```text
+receive exact bytes -> hash -> classify -> approve if needed
+                    -> verify unchanged -> execute -> record result
+```
+
+The decision is `ALLOW`, `ASK`, or `DENY`, with unknown commands defaulting to
+`ASK`. Temporary approvals do not modify persistent policy. Gate returns
+stdout, stderr, and the remote exit code, and stores the decision and result in
+SQLite.
+
+Gate does not expose private Windmill session IDs to agents, let agents choose
+arbitrary targets, or silently make temporary approvals permanent.
+
+### Policy
+
+The bundled policy automatically allows only narrow, read-only diagnostics.
+Anchored expressions and semantic validators constrain arguments, quoting,
+shell composition, and supported NS8 wrappers. Unmatched or malformed commands
+remain `ASK` unless a deny rule matches. Classification never rewrites the
+approved command.
+
+Analyze audit history for possible persistent policy improvements with:
+
+```bash
+./gate policy-review analyze
+```
+
+Gate never applies a policy suggestion automatically.
+
+### Architecture
 
 ```text
                               human operator
@@ -188,19 +220,17 @@ Codex or agent ---> gate-sh ---> Gate service ---> SSH ---> Bastion
                               SQLite audit            production target
 ```
 
-The pieces have small, separate responsibilities:
-
 | Piece | Responsibility |
 | --- | --- |
-| `gate` | Target selection, policy, approval console, execution, audit, and forwarding |
+| `gate` | Target selection, policy, approval, execution, audit, and forwarding |
 | `gate-sh` | Submits exactly one command and waits for its result |
 | Local IPC | Unix socket on Linux/macOS; access-controlled named pipe on Windows |
-| SSH | Connection from Gate to the Bastion |
-| Sancho/Windmill | Existing transport from the Bastion to production |
-| SQLite | Local audit history |
-| YAML policy | Human-managed persistent authorization rules |
+| SSH | Connects Gate to the Bastion |
+| Sancho/Windmill | Provides the existing transport from Bastion to production |
+| SQLite | Stores local audit history |
+| YAML policy | Defines human-managed persistent authorization rules |
 
-Gate deliberately keeps three identities separate:
+Gate keeps three identities separate:
 
 | Identifier | Who can see it |
 | --- | --- |
@@ -211,52 +241,7 @@ Gate deliberately keeps three identities separate:
 The Gate target ID is random and is never derived from the private Windmill
 session ID.
 
-## Useful commands
-
-Run Gate without the interactive console:
-
-```bash
-./gate daemon --bastion operator@bastion.example --agent codex-1
-```
-
-Daemon mode cannot approve `ASK` commands, so it is useful only when policy
-already allows or blocks every expected command.
-
-Inspect command history:
-
-```bash
-./gate history --agent codex-1
-```
-
-Create and remove controlled web-service forwards:
-
-```bash
-./gate forward add --remote-port 443
-./gate forward list
-./gate forward remove fw_EXAMPLE
-```
-
-Create and remove a hostname-sensitive HTTPS alias:
-
-```bash
-./gate host add foo.example.com --remote-port 443
-./gate host list
-./gate host remove foo.example.com
-```
-
-On Windows, hostname aliases require Gate to run from an elevated terminal so
-it can update the system hosts file. Port forwarding itself does not require
-hosts-file access.
-
-Analyze audit history for possible policy improvements:
-
-```bash
-./gate policy-review analyze
-```
-
-Gate never applies a policy suggestion automatically.
-
-## Local files
+### Local files
 
 | Purpose | Linux/macOS | Windows |
 | --- | --- | --- |
@@ -266,14 +251,14 @@ Gate never applies a policy suggestion automatically.
 | SSH client identities | `$XDG_CONFIG_HOME/gate/ssh-clients.yaml` | `%APPDATA%\gate\ssh-clients.yaml` |
 | Policy-review configuration | `$XDG_CONFIG_HOME/gate/policy-review.yaml` | `%APPDATA%\gate\policy-review.yaml` |
 
-On first launch, Gate installs its bundled default policy only when the active
-policy file does not exist. A later Gate update never overwrites an existing
-policy; the operator must review and deploy policy changes explicitly.
+On first launch, Gate installs its bundled default policy only if the active
+policy file does not exist. Updates never overwrite an existing policy; an
+operator must explicitly review and deploy persistent policy changes.
 
-## Build from source
+### Build from source
 
-This section is only for contributors. Normal users should use the installer at
-the top of this page.
+Normal users should use the installers above. Contributors can build and test
+the project with:
 
 ```bash
 make build
