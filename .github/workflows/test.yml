@@ -35,12 +35,22 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          foreach ($script in Get-ChildItem -LiteralPath . -Filter *.ps1) {
+          foreach ($script in Get-ChildItem -LiteralPath . -Filter *.ps1 -Recurse) {
             $tokens = $null
             $parseErrors = $null
             [System.Management.Automation.Language.Parser]::ParseFile($script.FullName, [ref]$tokens, [ref]$parseErrors) | Out-Null
             if ($parseErrors.Count -ne 0) { throw ($parseErrors | Out-String) }
           }
+
+      - name: Test installer with PowerShell 7
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .\scripts\test-distribution.ps1
+
+      - name: Test installer with Windows PowerShell
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: .\scripts\test-distribution.ps1
 
   distribution-test:
     runs-on: ubuntu-latest

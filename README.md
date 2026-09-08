@@ -28,14 +28,15 @@ curl -fsSL https://raw.githubusercontent.com/stell0/windmill-gate/main/install.s
 cd windmill-gate
 ```
 
-Start Gate in the operator terminal, replacing the example Bastion address:
+Start Gate in the operator terminal, replacing the example Bastion address and
+session ID:
 
 ```bash
-./gate --bastion operator@bastion.example --agent codex-1
+./gate --bastion operator@bastion.example --agent codex-1 --session "<SESSION ID>"
 ```
 
-Choose a target when prompted and leave this terminal open. Then open a second
-terminal, enter the Gate installation directory, and start Codex:
+Leave this terminal open. Then open a second terminal, enter the Gate
+installation directory, and start Codex:
 
 ```bash
 cd windmill-gate
@@ -49,20 +50,21 @@ PowerShell:
 
 ```powershell
 irm https://raw.githubusercontent.com/stell0/windmill-gate/main/install.ps1 | iex
-Set-Location windmill-gate
+Set-Location "$env:USERPROFILE\windmill-gate"
 ```
 
-Start Gate in the operator terminal, replacing the example Bastion address:
+Start Gate in the operator terminal, replacing the example Bastion address and
+session ID:
 
 ```powershell
-.\gate.exe --bastion operator@bastion.example --agent codex-1
+.\gate.exe --bastion operator@bastion.example --agent codex-1 --session "<SESSION ID>"
 ```
 
-Choose a target when prompted and leave this terminal open. Then open a second
-PowerShell window, enter the Gate installation directory, and start Codex:
+Leave this terminal open. Then open a second PowerShell window, enter the Gate
+installation directory, and start Codex:
 
 ```powershell
-Set-Location windmill-gate
+Set-Location "$env:USERPROFILE\windmill-gate"
 codex
 ```
 
@@ -158,7 +160,7 @@ elevation.
 Run Gate without the interactive operator console:
 
 ```bash
-./gate daemon --bastion operator@bastion.example --agent codex-1
+./gate daemon --bastion operator@bastion.example --agent codex-1 --session "<SESSION ID>"
 ```
 
 Daemon mode cannot approve `ASK` commands. Use it only when policy already

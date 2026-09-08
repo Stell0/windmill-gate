@@ -94,4 +94,4 @@ fi
 printf '\n%s\n' "Gate is ready in $gate_install_dir"
 printf '%s\n' "Next:"
 printf '  cd %s\n' "$gate_install_dir"
-printf '%s\n' "  ./gate --bastion operator@bastion.example --agent codex-1"
+printf '%s\n' "  ./gate --bastion operator@bastion.example --agent codex-1 --session '<SESSION ID>'"

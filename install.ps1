@@ -1,6 +1,10 @@
 param(
     [string]$Version = $(if ($env:GATE_VERSION) { $env:GATE_VERSION } else { "latest" }),
-    [string]$InstallDir = $(if ($env:GATE_INSTALL_DIR) { $env:GATE_INSTALL_DIR } else { "windmill-gate" })
+    [string]$InstallDir = $(if ($env:GATE_INSTALL_DIR) {
+        $env:GATE_INSTALL_DIR
+    } else {
+        Join-Path ([Environment]::GetFolderPath("UserProfile")) "windmill-gate"
+    })
 )
 
 $ErrorActionPreference = "Stop"
@@ -10,10 +14,14 @@ if (Test-Path -LiteralPath $InstallDir) {
     throw "Gate installer: $InstallDir already exists"
 }
 
-$architecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
+$architecture = if ($env:PROCESSOR_ARCHITEW6432) {
+    $env:PROCESSOR_ARCHITEW6432
+} else {
+    $env:PROCESSOR_ARCHITECTURE
+}
 switch ($architecture) {
-    "X64" { $gateArch = "amd64" }
-    "Arm64" { $gateArch = "arm64" }
+    "AMD64" { $gateArch = "amd64" }
+    "ARM64" { $gateArch = "arm64" }
     default { throw "Gate installer: unsupported CPU architecture $architecture" }
 }
 
@@ -33,8 +41,12 @@ try {
     $archivePath = Join-Path $temporary $archiveName
     $checksumsPath = Join-Path $temporary "checksums.txt"
     Write-Host "Downloading Gate $Version for windows/$gateArch..."
-    Invoke-WebRequest -UseBasicParsing -Uri "$releaseBase/$archiveName" -OutFile $archivePath
-    Invoke-WebRequest -UseBasicParsing -Uri "$releaseBase/checksums.txt" -OutFile $checksumsPath
+    try {
+        Invoke-WebRequest -UseBasicParsing -Uri "$releaseBase/$archiveName" -OutFile $archivePath
+        Invoke-WebRequest -UseBasicParsing -Uri "$releaseBase/checksums.txt" -OutFile $checksumsPath
+    } catch {
+        throw "Gate installer: could not download the Windows release files from $releaseBase. Verify that the requested release includes $archiveName. $($_.Exception.Message)"
+    }
 
     $checksumLine = Get-Content -LiteralPath $checksumsPath | Where-Object {
         $_ -match ("\s" + [regex]::Escape($archiveName) + "$")
@@ -74,4 +86,4 @@ try {
 Write-Host "`nGate is ready in $InstallDir"
 Write-Host "Next:"
 Write-Host "  Set-Location '$InstallDir'"
-Write-Host "  .\gate.exe --bastion operator@bastion.example --agent codex-1"
+Write-Host "  .\gate.exe --bastion operator@bastion.example --agent codex-1 --session '<SESSION ID>'"
