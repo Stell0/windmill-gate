@@ -13,6 +13,8 @@ is installed on `PATH`:
 ./gate forward add --remote-port 443
 ```
 
+On Windows, use `.\gate.exe forward add --remote-port 443`.
+
 Use the returned `127.0.0.1:<port>` endpoint. Ports 80 and 443 may be policy-allowed; other ports can wait for operator approval.
 
 If TLS, virtual-host routing, or cookies require the original hostname, request the linked Gate-owned alias:
@@ -21,7 +23,9 @@ If TLS, virtual-host routing, or cookies require the original hostname, request 
 ./gate host add foo.example.com --remote-port 443
 ```
 
-Use the exact URL Gate returns, including its local port. Do not edit `/etc/hosts` directly.
+Use the exact URL Gate returns, including its local port. Do not edit the
+system hosts file directly. On Windows, Gate must be running elevated before a
+hostname alias can be added; the forward itself remains loopback-only.
 
 For a hosted Gate, put `--ssh <gate-host>` before resource identifiers or other positional arguments. Do not use direct `ssh -L`, `ssh -R`, dynamic/SOCKS forwarding, proxy commands, agent forwarding, or another tunnel that bypasses Gate.
 

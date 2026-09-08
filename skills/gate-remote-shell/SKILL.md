@@ -14,6 +14,12 @@ From a downloaded release directory, run:
 ./gate-sh --agent <agent-identity> -c '<exact command>'
 ```
 
+From a Windows release directory, use PowerShell:
+
+```powershell
+.\gate-sh.exe --agent <agent-identity> -c '<exact command>'
+```
+
 For a source build, use `bin/gate-sh`; when Gate is installed on `PATH`, use
 `gate-sh`. For a hosted Gate, add the configured restricted transport before
 `-c`:
@@ -21,6 +27,9 @@ For a source build, use `bin/gate-sh`; when Gate is installed on `PATH`, use
 ```bash
 gate-sh --ssh <gate-host> --agent <agent-identity> -c '<exact command>'
 ```
+
+On Windows, the hosted form is `.\gate-sh.exe --ssh <gate-host> --agent
+<agent-identity> -c '<exact command>'`.
 
 Use the identity supplied by the harness or operator. Do not guess another
 identity if attachment fails.

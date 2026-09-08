@@ -9,6 +9,23 @@ import (
 	"github.com/stell0/windmill-gate/internal/backend"
 )
 
+func TestShellClientExecutableRecognizesWindowsBinary(t *testing.T) {
+	tests := map[string]bool{
+		"gate-sh":          true,
+		"gate-sh.exe":      true,
+		"GATE-SH.EXE":      true,
+		"gate":             false,
+		"gate.exe":         false,
+		"gate-sh.backup":   false,
+		"/tmp/gate-sh.exe": true,
+	}
+	for path, expected := range tests {
+		if actual := shellClientExecutable(path); actual != expected {
+			t.Errorf("shellClientExecutable(%q) = %t, want %t", path, actual, expected)
+		}
+	}
+}
+
 func TestChooseTargetNeverDisplaysBackendID(t *testing.T) {
 	targets := []backend.Target{
 		{ID: "windmill-secret-4837291", DisplayName: "customer-a"},

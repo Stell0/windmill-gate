@@ -28,6 +28,7 @@ import (
 	"github.com/stell0/windmill-gate/internal/protocol"
 	"github.com/stell0/windmill-gate/internal/remote"
 	"github.com/stell0/windmill-gate/internal/review"
+	"github.com/stell0/windmill-gate/internal/securefs"
 	"github.com/stell0/windmill-gate/internal/storage"
 	"github.com/stell0/windmill-gate/internal/tui"
 	defaultpolicy "github.com/stell0/windmill-gate/policy"
@@ -36,7 +37,7 @@ import (
 var version = "dev"
 
 func main() {
-	if filepath.Base(os.Args[0]) == "gate-sh" {
+	if shellClientExecutable(os.Args[0]) {
 		os.Exit(runShell(os.Args[1:], os.Stdout, os.Stderr))
 	}
 	os.Exit(run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
@@ -91,8 +92,8 @@ func runServer(args []string, withUI bool, stdin io.Reader, stdout, stderr io.Wr
 	var outputLimit int64
 	var targetSSHPort int
 	var sshArgs repeatedFlag
-	flags.StringVar(&socketPath, "socket", config.SocketPath(), "Unix socket path")
-	flags.StringVar(&sshSocketPath, "ssh-socket", remoteSocketPath(config.SocketPath()), "trusted SSH bridge socket path")
+	flags.StringVar(&socketPath, "socket", config.SocketPath(), "local IPC endpoint")
+	flags.StringVar(&sshSocketPath, "ssh-socket", remoteSocketPath(config.SocketPath()), "trusted SSH bridge IPC endpoint")
 	flags.StringVar(&databasePath, "database", config.DatabasePath(), "SQLite database path")
 	flags.StringVar(&policyPath, "policy", config.PolicyPath(), "policy YAML path")
 	flags.StringVar(&bastion, "bastion", os.Getenv("GATE_BASTION"), "Bastion SSH host")
@@ -101,7 +102,7 @@ func runServer(args []string, withUI bool, stdin io.Reader, stdout, stderr io.Wr
 	flags.StringVar(&sessionSelector, "session", "", "private Windmill session ID (operator only)")
 	flags.StringVar(&agentID, "agent", config.AgentIdentity(), "initial attached agent identity")
 	flags.StringVar(&operator, "operator", envOr("GATE_OPERATOR", "operator"), "operator audit identity")
-	flags.StringVar(&hostsPath, "hosts-file", envOr("GATE_HOSTS_FILE", "/etc/hosts"), "Gate-managed hosts file")
+	flags.StringVar(&hostsPath, "hosts-file", envOr("GATE_HOSTS_FILE", config.HostsPath()), "Gate-managed hosts file")
 	flags.Int64Var(&outputLimit, "output-limit", gatecore.DefaultOutputLimit, "maximum output bytes per command")
 	flags.IntVar(&targetSSHPort, "target-ssh-port", windmill.DefaultTargetSSHPort, "legacy Windmill target SSH port")
 	flags.Var(&sshArgs, "ssh-arg", "additional SSH argument (repeatable)")
@@ -182,13 +183,13 @@ func runServer(args []string, withUI bool, stdin io.Reader, stdout, stderr io.Wr
 		fmt.Fprintf(stderr, "gate: attach agent: %v\n", err)
 		return 1
 	}
-	listener, err := agent.ListenUnix(socketPath)
+	listener, err := agent.ListenLocal(socketPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "gate: %v\n", err)
 		return 1
 	}
 	defer listener.Close()
-	sshListener, err := agent.ListenUnix(sshSocketPath)
+	sshListener, err := agent.ListenLocal(sshSocketPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "gate: %v\n", err)
 		return 1
@@ -196,14 +197,14 @@ func runServer(args []string, withUI bool, stdin io.Reader, stdout, stderr io.Wr
 	defer sshListener.Close()
 	serverErr := make(chan error, 2)
 	go func() {
-		serverErr <- (&agent.Server{Service: service, Transport: "unix"}).Serve(ctx, listener)
+		serverErr <- (&agent.Server{Service: service, Transport: agent.LocalTransport()}).Serve(ctx, listener)
 	}()
 	go func() {
 		serverErr <- (&agent.Server{Service: service, Transport: "ssh", TrustHelloFingerprint: true}).Serve(ctx, sshListener)
 	}()
 	fmt.Fprintf(stdout, "Gate target %s (%s) selected\n", public.ID, public.DisplayName)
 	fmt.Fprintf(stdout, "Agent %s attached; listening on %s\n", agentID, socketPath)
-	fmt.Fprintf(stdout, "Restricted SSH bridge socket: %s\n", sshSocketPath)
+	fmt.Fprintf(stdout, "Restricted SSH bridge endpoint: %s\n", sshSocketPath)
 
 	if withUI {
 		app := tui.App{Service: service, Backend: implementation, Operator: operator, Input: stdin, Output: stdout}
@@ -238,7 +239,7 @@ func runSSHServer(args []string, stdin io.Reader, stdout, stderr io.Writer) int 
 	flags := flag.NewFlagSet("gate ssh-server", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	var socketPath, clientsPath string
-	flags.StringVar(&socketPath, "socket", remoteSocketPath(config.SocketPath()), "trusted SSH bridge socket")
+	flags.StringVar(&socketPath, "socket", remoteSocketPath(config.SocketPath()), "trusted SSH bridge IPC endpoint")
 	flags.StringVar(&clientsPath, "clients", config.SSHClientsPath(), "SSH fingerprint mapping YAML")
 	if err := flags.Parse(args); err != nil || flags.NArg() != 0 {
 		return 2
@@ -262,7 +263,7 @@ func runSSHServer(args []string, stdin io.Reader, stdout, stderr io.Writer) int 
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	bridge := remote.Bridge{Dial: agent.UnixDialer(socketPath), Clients: clients, Fingerprint: fingerprint}
+	bridge := remote.Bridge{Dial: agent.LocalDialer(socketPath), Clients: clients, Fingerprint: fingerprint}
 	if err := bridge.Run(ctx, stdin, stdout); err != nil {
 		fmt.Fprintf(stderr, "gate ssh-server: %v\n", err)
 		return 1
@@ -275,7 +276,7 @@ func runExec(args []string, stdout, stderr io.Writer) int {
 	flags.SetOutput(stderr)
 	var socketPath, agentID, sshHost string
 	var sshArgs repeatedFlag
-	flags.StringVar(&socketPath, "socket", config.SocketPath(), "Unix socket path")
+	flags.StringVar(&socketPath, "socket", config.SocketPath(), "local IPC endpoint")
 	flags.StringVar(&agentID, "agent", config.AgentIdentity(), "agent identity")
 	flags.StringVar(&sshHost, "ssh", "", "restricted remote Gate SSH host")
 	flags.Var(&sshArgs, "ssh-arg", "additional SSH argument (repeatable)")
@@ -288,7 +289,7 @@ func runExec(args []string, stdout, stderr io.Writer) int {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	dialer := agent.UnixDialer(socketPath)
+	dialer := agent.LocalDialer(socketPath)
 	if sshHost != "" {
 		dialer = agent.SSHDialer(sshHost, sshArgs, stderr)
 	}
@@ -307,7 +308,7 @@ func runShell(args []string, stdout, stderr io.Writer) int {
 	var command, socketPath, agentID, sshHost string
 	var sshArgs repeatedFlag
 	flags.StringVar(&command, "c", "", "execute one non-interactive command")
-	flags.StringVar(&socketPath, "socket", config.SocketPath(), "Gate Unix socket")
+	flags.StringVar(&socketPath, "socket", config.SocketPath(), "Gate local IPC endpoint")
 	flags.StringVar(&agentID, "agent", config.AgentIdentity(), "agent identity")
 	flags.StringVar(&sshHost, "ssh", "", "restricted remote Gate SSH host")
 	flags.Var(&sshArgs, "ssh-arg", "additional SSH argument (repeatable)")
@@ -320,7 +321,7 @@ func runShell(args []string, stdout, stderr io.Writer) int {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	dialer := agent.UnixDialer(socketPath)
+	dialer := agent.LocalDialer(socketPath)
 	if sshHost != "" {
 		dialer = agent.SSHDialer(sshHost, sshArgs, stderr)
 	}
@@ -342,14 +343,14 @@ type connectionOptions struct {
 }
 
 func (o *connectionOptions) bind(flags *flag.FlagSet) {
-	flags.StringVar(&o.socketPath, "socket", config.SocketPath(), "Unix socket path")
+	flags.StringVar(&o.socketPath, "socket", config.SocketPath(), "local IPC endpoint")
 	flags.StringVar(&o.agentID, "agent", config.AgentIdentity(), "agent identity")
 	flags.StringVar(&o.sshHost, "ssh", "", "restricted remote Gate SSH host")
 	flags.Var(&o.sshArgs, "ssh-arg", "additional SSH argument (repeatable)")
 }
 
 func (o connectionOptions) client(stderr io.Writer) agent.Client {
-	dialer := agent.UnixDialer(o.socketPath)
+	dialer := agent.LocalDialer(o.socketPath)
 	if o.sshHost != "" {
 		dialer = agent.SSHDialer(o.sshHost, o.sshArgs, stderr)
 	}
@@ -722,13 +723,35 @@ func ensurePolicy(path string) error {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("inspect policy: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	directory := filepath.Dir(path)
+	_, statErr := os.Stat(directory)
+	createdDirectory := errors.Is(statErr, os.ErrNotExist)
+	if statErr != nil && !createdDirectory {
+		return fmt.Errorf("inspect policy directory: %w", statErr)
+	}
+	if err := os.MkdirAll(directory, 0o700); err != nil {
 		return fmt.Errorf("create policy directory: %w", err)
+	}
+	if createdDirectory {
+		if err := securefs.PrivateDir(directory); err != nil {
+			return fmt.Errorf("secure policy directory: %w", err)
+		}
 	}
 	if err := os.WriteFile(path, defaultpolicy.DefaultYAML, 0o600); err != nil {
 		return fmt.Errorf("create default policy: %w", err)
 	}
+	if err := securefs.PrivateFile(path); err != nil {
+		return fmt.Errorf("secure policy permissions: %w", err)
+	}
 	return nil
+}
+
+func shellClientExecutable(path string) bool {
+	name := filepath.Base(path)
+	if strings.EqualFold(filepath.Ext(name), ".exe") {
+		name = strings.TrimSuffix(name, filepath.Ext(name))
+	}
+	return strings.EqualFold(name, "gate-sh")
 }
 
 func envOr(name, fallback string) string {

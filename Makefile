@@ -1,4 +1,4 @@
-.PHONY: all build test test-race policy-test distribution-test clean
+.PHONY: all build build-windows test test-race policy-test distribution-test clean
 
 GO ?= go
 
@@ -8,6 +8,11 @@ build:
 	mkdir -p bin
 	$(GO) build -trimpath -o bin/gate ./cmd/gate
 	ln -sf gate bin/gate-sh
+
+build-windows:
+	mkdir -p bin
+	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 $(GO) build -trimpath -o bin/gate-windows-amd64.exe ./cmd/gate
+	cp bin/gate-windows-amd64.exe bin/gate-sh.exe
 
 test: distribution-test
 	$(GO) test ./...

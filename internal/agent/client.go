@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"os/exec"
 	"sync"
 
@@ -20,13 +19,6 @@ type Client struct {
 	AgentID string
 	Stdout  io.Writer
 	Stderr  io.Writer
-}
-
-func UnixDialer(path string) Dialer {
-	return func(ctx context.Context) (io.ReadWriteCloser, error) {
-		var dialer net.Dialer
-		return dialer.DialContext(ctx, "unix", path)
-	}
 }
 
 func SSHDialer(host string, args []string, stderr io.Writer) Dialer {

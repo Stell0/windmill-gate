@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -219,35 +218,6 @@ func (m *AliasManager) readHosts() ([]byte, os.FileMode, error) {
 		return nil, 0, fmt.Errorf("read hosts file: %w", err)
 	}
 	return data, info.Mode().Perm(), nil
-}
-
-func atomicWrite(path string, data []byte, mode os.FileMode) error {
-	temporary, err := os.CreateTemp(filepath.Dir(path), ".gate-hosts-")
-	if err != nil {
-		return fmt.Errorf("create temporary hosts file: %w", err)
-	}
-	name := temporary.Name()
-	cleanup := func() { _ = os.Remove(name) }
-	defer cleanup()
-	if err := temporary.Chmod(mode); err != nil {
-		temporary.Close()
-		return fmt.Errorf("preserve hosts file mode: %w", err)
-	}
-	if _, err := temporary.Write(data); err != nil {
-		temporary.Close()
-		return fmt.Errorf("write hosts file: %w", err)
-	}
-	if err := temporary.Sync(); err != nil {
-		temporary.Close()
-		return fmt.Errorf("sync hosts file: %w", err)
-	}
-	if err := temporary.Close(); err != nil {
-		return fmt.Errorf("close hosts file: %w", err)
-	}
-	if err := os.Rename(name, path); err != nil {
-		return fmt.Errorf("replace hosts file: %w", err)
-	}
-	return nil
 }
 
 var hostnameLabel = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)

@@ -1,15 +1,16 @@
-name: Release
+name: Test
 
 on:
+  pull_request:
   push:
-    tags:
-      - "v*"
+    branches:
+      - main
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  test:
+  go-test:
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest]
@@ -41,30 +42,11 @@ jobs:
             if ($parseErrors.Count -ne 0) { throw ($parseErrors | Out-String) }
           }
 
-  release:
-    needs: test
+  distribution-test:
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
         uses: actions/checkout@v7
 
-      - name: Set up Go
-        uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-          cache-dependency-path: go.sum
-
-      - name: Test
-        run: |
-          make distribution-test
-
-      - name: Build release archives
-        env:
-          GATE_RELEASE_VERSION: ${{ github.ref_name }}
-        run: sh scripts/build-release.sh "$GATE_RELEASE_VERSION"
-
-      - name: Publish GitHub release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GATE_RELEASE_VERSION: ${{ github.ref_name }}
-        run: gh release create "$GATE_RELEASE_VERSION" dist/* --verify-tag --generate-notes
+      - name: Test distribution scripts
+        run: make distribution-test

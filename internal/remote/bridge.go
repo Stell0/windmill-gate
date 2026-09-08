@@ -11,6 +11,7 @@ import (
 
 	"github.com/stell0/windmill-gate/internal/agent"
 	"github.com/stell0/windmill-gate/internal/protocol"
+	"github.com/stell0/windmill-gate/internal/securefs"
 	"gopkg.in/yaml.v3"
 )
 
@@ -24,6 +25,9 @@ type ClientConfig struct {
 }
 
 func LoadClients(path string) (ClientConfig, error) {
+	if err := securefs.PrivateFile(path); err != nil {
+		return ClientConfig{}, fmt.Errorf("secure SSH clients file: %w", err)
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return ClientConfig{}, fmt.Errorf("read SSH clients: %w", err)

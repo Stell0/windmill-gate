@@ -16,6 +16,7 @@ import (
 	"github.com/stell0/windmill-gate/internal/approval"
 	"github.com/stell0/windmill-gate/internal/command"
 	"github.com/stell0/windmill-gate/internal/policy"
+	"github.com/stell0/windmill-gate/internal/securefs"
 	"github.com/stell0/windmill-gate/internal/target"
 	_ "modernc.org/sqlite"
 )
@@ -119,8 +120,29 @@ func Open(path string) (*Store, error) {
 	if path == "" {
 		return nil, errors.New("database path is required")
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	directory := filepath.Dir(path)
+	_, statErr := os.Stat(directory)
+	createdDirectory := errors.Is(statErr, os.ErrNotExist)
+	if statErr != nil && !createdDirectory {
+		return nil, fmt.Errorf("inspect database directory: %w", statErr)
+	}
+	if err := os.MkdirAll(directory, 0o700); err != nil {
 		return nil, fmt.Errorf("create database directory: %w", err)
+	}
+	if createdDirectory {
+		if err := securefs.PrivateDir(directory); err != nil {
+			return nil, fmt.Errorf("secure database directory: %w", err)
+		}
+	}
+	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("create database file: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		return nil, fmt.Errorf("close database file: %w", err)
+	}
+	if err := securefs.PrivateFile(path); err != nil {
+		return nil, fmt.Errorf("secure database permissions: %w", err)
 	}
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
@@ -131,10 +153,6 @@ func Open(path string) (*Store, error) {
 	if err := store.migrate(context.Background()); err != nil {
 		db.Close()
 		return nil, err
-	}
-	if err := os.Chmod(path, 0o600); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("secure database permissions: %w", err)
 	}
 	return store, nil
 }

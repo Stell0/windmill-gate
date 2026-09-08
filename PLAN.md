@@ -9,25 +9,26 @@ The plan intentionally favors a small, auditable design over feature breadth.
 Versions v0.1 through v0.3 are implemented. The code follows the implementation order below with these completed checkpoints:
 
 - opaque target registry and private Windmill backend mapping;
-- bounded Unix-socket NDJSON protocol and `gate-sh` client;
+- bounded local NDJSON protocol over Unix sockets or Windows named pipes and a
+  `gate-sh` client;
 - immutable command hashing, conservative regex-plus-validator policy evaluation, strict NS8 wrapper views, and hash-bound approvals;
 - SQLite audit/history and an accessible operator console with a current-run authorization ledger;
 - restricted forced-command SSH bridge with fingerprint-to-identity mapping;
 - concurrent targets/clients, cancellation, and target-scoped temporary rules;
 - loopback-only forwards and exact-marker-owned hostname aliases;
 - harness-neutral Gate skills and a tested policy-analysis/PR workflow that stops before merge or deployment;
-- tag-driven GitHub releases with checked prebuilt Linux/macOS archives, a
-  no-build installer, repository-scoped Codex skill discovery, and a standalone
-  updater for the external `nethserver-admin` skill bundle.
+- tag-driven GitHub releases with checked prebuilt Linux/macOS/Windows archives,
+  no-build installers, repository-scoped Codex skill discovery, and standalone
+  updaters for the external `nethserver-admin` skill bundle.
 
 The Windmill adapter prefers the Sancho command primitives documented in `README.md`. It also supports the deployed Sancho 0.0.1 object-stream format with a constrained, target-scoped nested SSH compatibility path through the Bastion. Items under “Later ideas” remain intentionally deferred.
 
 End-user distribution is hosted at `github.com/stell0/windmill-gate`. A `v*`
-tag tests the project and publishes checksum-protected archives for Linux and
-macOS on AMD64 and ARM64. Release archives include Gate's canonical `skills/`
-content and `.agents/skills` discovery entries. The installer retrieves the
-external NethServer admin skill from `NethServer/agents`; it is not vendored or
-silently persisted into Gate policy.
+tag tests the project on Linux and Windows and publishes checksum-protected
+archives for Linux, macOS, and Windows on AMD64 and ARM64. Release archives
+include Gate's canonical `skills/` content and `.agents/skills` discovery
+entries. The installer retrieves the external NethServer admin skill from
+`NethServer/agents`; it is not vendored or silently persisted into Gate policy.
 
 ## Design constraints
 
@@ -42,7 +43,8 @@ The following constraints apply to every version:
 - `ASK` is the default.
 - Approved command bytes cannot change between approval and execution.
 - Persistent policy changes require explicit review.
-- Local mode should not require a TCP listener.
+- Local mode should not require a TCP listener; use access-controlled Unix
+  sockets or Windows named pipes.
 - Remote Gate access uses SSH rather than inventing a new authentication mechanism.
 - SQLite is the default state store.
 

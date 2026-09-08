@@ -15,7 +15,8 @@ You do **not** need Go, a compiler, or a developer environment.
 
 You need:
 
-- a Linux or macOS computer with `curl`, `tar`, and `ssh`;
+- Linux or macOS with `curl`, `tar`, and `ssh`, or Windows with PowerShell and
+  the OpenSSH client;
 - SSH access to your Bastion;
 - Sancho installed on the Bastion;
 - [Codex](https://developers.openai.com/codex/cli) if you want to use the
@@ -28,9 +29,16 @@ curl -fsSL https://raw.githubusercontent.com/stell0/windmill-gate/main/install.s
 cd windmill-gate
 ```
 
-The installer downloads the latest prebuilt binary for Linux or macOS, checks
-its SHA-256 checksum, and installs the Gate and NethServer skills. It does not
-compile anything.
+On Windows, use PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/stell0/windmill-gate/main/install.ps1 | iex
+Set-Location windmill-gate
+```
+
+The installer downloads the latest prebuilt binary for the current platform,
+checks its SHA-256 checksum, and installs the Gate and NethServer skills. It
+does not compile anything.
 
 ### 2. Start Gate
 
@@ -38,6 +46,12 @@ In the operator terminal, replace the example Bastion address:
 
 ```bash
 ./gate --bastion operator@bastion.example --agent codex-1 --session <session id>
+```
+
+On Windows, run the equivalent command in PowerShell:
+
+```powershell
+.\gate.exe --bastion operator@bastion.example --agent codex-1 --session <session-id>
 ```
 
 And leave this terminal open.
@@ -74,6 +88,12 @@ Gate without an agent:
 ./gate-sh --agent codex-1 -c 'uname -a'
 ```
 
+On Windows:
+
+```powershell
+.\gate-sh.exe --agent codex-1 -c 'uname -a'
+```
+
 ## Skills
 
 The release includes three Gate skills:
@@ -96,6 +116,8 @@ Retrieve the skill again or update it at any time with:
 ```bash
 ./update-nethserver-admin
 ```
+
+On Windows, use `.\update-nethserver-admin.ps1`.
 
 If Codex was already running, restart it if the updated skill does not appear.
 Use `/skills` inside Codex to see the available skills.
@@ -172,7 +194,7 @@ The pieces have small, separate responsibilities:
 | --- | --- |
 | `gate` | Target selection, policy, approval console, execution, audit, and forwarding |
 | `gate-sh` | Submits exactly one command and waits for its result |
-| Unix socket | Local connection between the agent client and Gate |
+| Local IPC | Unix socket on Linux/macOS; access-controlled named pipe on Windows |
 | SSH | Connection from Gate to the Bastion |
 | Sancho/Windmill | Existing transport from the Bastion to production |
 | SQLite | Local audit history |
@@ -222,6 +244,10 @@ Create and remove a hostname-sensitive HTTPS alias:
 ./gate host remove foo.example.com
 ```
 
+On Windows, hostname aliases require Gate to run from an elevated terminal so
+it can update the system hosts file. Port forwarding itself does not require
+hosts-file access.
+
 Analyze audit history for possible policy improvements:
 
 ```bash
@@ -232,13 +258,13 @@ Gate never applies a policy suggestion automatically.
 
 ## Local files
 
-| Purpose | Default path |
-| --- | --- |
-| Unix socket | `$XDG_RUNTIME_DIR/gate.sock` |
-| SQLite audit database | `$XDG_DATA_HOME/gate/gate.db` |
-| Active policy | `$XDG_CONFIG_HOME/gate/policy.yaml` |
-| SSH client identities | `$XDG_CONFIG_HOME/gate/ssh-clients.yaml` |
-| Policy-review configuration | `$XDG_CONFIG_HOME/gate/policy-review.yaml` |
+| Purpose | Linux/macOS | Windows |
+| --- | --- | --- |
+| Local IPC | `$XDG_RUNTIME_DIR/gate.sock` | `\\.\pipe\windmill-gate-<user-hash>` |
+| SQLite audit database | `$XDG_DATA_HOME/gate/gate.db` | `%LOCALAPPDATA%\gate\gate.db` |
+| Active policy | `$XDG_CONFIG_HOME/gate/policy.yaml` | `%APPDATA%\gate\policy.yaml` |
+| SSH client identities | `$XDG_CONFIG_HOME/gate/ssh-clients.yaml` | `%APPDATA%\gate\ssh-clients.yaml` |
+| Policy-review configuration | `$XDG_CONFIG_HOME/gate/policy-review.yaml` | `%APPDATA%\gate\policy-review.yaml` |
 
 On first launch, Gate installs its bundled default policy only when the active
 policy file does not exist. A later Gate update never overwrites an existing
@@ -251,12 +277,13 @@ the top of this page.
 
 ```bash
 make build
+make build-windows
 make policy-test
 make test
 make test-race
 ```
 
-Pushing a tag such as `v0.4.0` runs the release workflow. It tests Gate and
-publishes prebuilt Linux/macOS archives for AMD64 and ARM64 with a checksum
-file. See [PLAN.md](PLAN.md) for design details and [AGENTS.md](AGENTS.md) for
-repository rules.
+Pushing a tag such as `v0.4.0` runs the release workflow. It tests Gate on Linux
+and Windows and publishes checksum-protected Linux, macOS, and Windows archives
+for AMD64 and ARM64. See [PLAN.md](PLAN.md) for design details and
+[AGENTS.md](AGENTS.md) for repository rules.

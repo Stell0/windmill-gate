@@ -5,7 +5,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -88,13 +87,7 @@ func TestAuditRecordsSurviveRestartWithoutLeakingBackendID(t *testing.T) {
 	if len(entries) != 1 || entries[0].State != command.Succeeded || entries[0].OutputBytes != 9 {
 		t.Fatalf("audit history did not survive restart: %#v", entries)
 	}
-	mode, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if mode.Mode().Perm() != 0o600 {
-		t.Fatalf("database permissions = %o, want 600", mode.Mode().Perm())
-	}
+	assertPrivateDatabase(t, path)
 }
 
 func TestOutputLimitAndTruncationMetadata(t *testing.T) {
