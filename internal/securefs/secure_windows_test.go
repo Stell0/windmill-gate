@@ -5,8 +5,8 @@ package securefs
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -35,10 +35,32 @@ func TestPrivateFileUsesProtectedCurrentUserDACL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(descriptor.String(), user.User.Sid.String()) {
-		t.Fatalf("private file DACL does not contain current user: %s", descriptor.String())
+	dacl, _, err := descriptor.DACL()
+	if err != nil {
+		t.Fatal(err)
 	}
-	if strings.Contains(descriptor.String(), "S-1-1-0") {
-		t.Fatalf("private file DACL grants access to Everyone: %s", descriptor.String())
+	everyone, err := windows.StringToSid("S-1-1-0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundUser := false
+	for index := uint16(0); index < dacl.AceCount; index++ {
+		var ace *windows.ACCESS_ALLOWED_ACE
+		if err := windows.GetAce(dacl, uint32(index), &ace); err != nil {
+			t.Fatal(err)
+		}
+		if ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE {
+			continue
+		}
+		sid := (*windows.SID)(unsafe.Pointer(&ace.SidStart))
+		if user.User.Sid.Equals(sid) {
+			foundUser = true
+		}
+		if everyone.Equals(sid) {
+			t.Fatalf("private file DACL grants access to Everyone: %s", descriptor.String())
+		}
+	}
+	if !foundUser {
+		t.Fatalf("private file DACL does not contain current user: %s", descriptor.String())
 	}
 }
