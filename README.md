@@ -60,6 +60,10 @@ session ID:
 .\gate.exe --bastion operator@bastion.example --agent codex-1 --session "<SESSION ID>"
 ```
 
+When one approval is pending, the Windows operator console accepts a single-key
+decision without Enter. Keyboard echo is disabled while the console is active;
+Gate restores the previous console input settings when it exits.
+
 Leave this terminal open. Then open a second PowerShell window, enter the Gate
 installation directory, and start Codex:
 

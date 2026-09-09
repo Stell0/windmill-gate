@@ -22,7 +22,9 @@ func configureCharacterInput(input io.Reader) (func(), bool, error) {
 	if err := windows.GetConsoleMode(handle, &original); err != nil {
 		return nil, false, nil
 	}
-	characterMode := original &^ windows.ENABLE_LINE_INPUT
+	// Windows requires line input when echo is enabled. Clear both flags to
+	// accept single-key decisions without SetConsoleMode rejecting the mode.
+	characterMode := original &^ (windows.ENABLE_LINE_INPUT | windows.ENABLE_ECHO_INPUT)
 	if err := windows.SetConsoleMode(handle, characterMode); err != nil {
 		return nil, false, err
 	}
