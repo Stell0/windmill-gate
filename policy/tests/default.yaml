@@ -125,6 +125,12 @@ allow:
     expect: ALLOW
   - command: "runagent -m mail1 podman ps -a --format '{{.Names}} [Status:{{.Status}}] [Restarts:{{.Restarts}}]'"
     expect: ALLOW
+  - command: "runagent -m nethvoice9 podman ps -a --format {{.Names}}_{{.Image}}_{{.Status}}"
+    expect: ALLOW
+  - command: "runagent -m nethvoice9 podman inspect nethcti-server --format '{{.Image}} {{.Config.Image}} {{json .Mounts}}'"
+    expect: ALLOW
+  - command: "runagent -m mail7 podman image inspect ghcr.io/nethesis/nethvoice-cti-server:1.7.7 --format '{{.Id}} {{.Digest}} {{.Created}} {{json .Labels}}'"
+    expect: ALLOW
   - command: "runagent -m mail1 podman logs --tail 200 postfix"
     expect: ALLOW
   - command: "runagent -m nethvoice42 podman logs phonebook"
@@ -161,6 +167,14 @@ allow:
     expect: ALLOW
   - command: "runagent -m nethvoice1 podman exec freepbx asterisk -rx 'database show CF'"
     expect: ALLOW
+  - command: "runagent -m nethvoice9 podman exec freepbx asterisk -rx 'voicemail show user 201@default'"
+    expect: ALLOW
+  - command: "runagent -m nethvoice9 podman exec nethcti-server grep -n getVoicemailNewMsg /app/plugins/dbconn/plugins/dbconn_voicemail.js /app/plugins/dbconn/dbconn_main.js /app/plugins/voicemail/voicemail.js"
+    expect: ALLOW
+  - command: "runagent -m nethvoice9 podman exec freepbx grep -nE '^[[:space:]]*(mailcmd|attach)[[:space:]]*=' /etc/asterisk/voicemail.conf"
+    expect: ALLOW
+  - command: "runagent -m nethvoice9 podman exec mariadb mysql --version"
+    expect: ALLOW
   - command: "grep foo /var/log/messages"
     expect: ALLOW
   - command: "ls -lah /etc/asterisk"
@@ -182,6 +196,18 @@ allow:
   - command: "/usr/bin/mysql --defaults-file=/root/.my.cnf -N --batch asterisk -e \"SELECT id,extension,UPPER(name) AS upper_name FROM users WHERE enabled = 1 AND extension = '100' ORDER BY extension LIMIT 100\""
     expect: ALLOW
   - command: "runagent -m nethvoice1 podman exec freepbx /usr/bin/mysql --defaults-file=/root/.my.cnf -N --batch asterisk -e \"SELECT REPLACE(name,'old','new') FROM users WHERE extension <> '' ORDER BY extension DESC LIMIT 0,50\""
+    expect: ALLOW
+  - command: "runagent -m nethvoice9 podman exec freepbx /usr/bin/mysql --defaults-file=/root/.my.cnf -N --batch asterisk -e 'SELECT mailboxuser FROM voicemessages WHERE id=2571 LIMIT 1'"
+    expect: ALLOW
+  - command: 'runagent -m nethvoice9 podman exec mariadb sh -c ''mysql -uroot -p${MARIADB_ROOT_PASSWORD} -N -B asterisk -e "SELECT mailboxuser FROM voicemessages WHERE id=2571 LIMIT 1"'''
+    expect: ALLOW
+  - command: 'runagent -m nethvoice9 podman exec mariadb sh -c ''mysql -uroot -p${MARIADB_ROOT_PASSWORD} -N -B asteriskcdrdb -e "SELECT mailboxuser FROM voicemessages WHERE id=2571 LIMIT 1"'''
+    expect: ALLOW
+  - command: 'runagent -m nethvoice9 podman exec mariadb sh -c ''mysql -uroot -p${MARIADB_ROOT_PASSWORD} -N -B asterisk -e "SELECT mailbox,attach,attachfmt FROM voicemail_users WHERE mailbox=201 LIMIT 1"'''
+    expect: ALLOW
+  - command: 'runagent -m nethvoice9 podman exec mariadb sh -c ''mysql -uroot -p${MARIADB_ROOT_PASSWORD} -N -B asterisk -e "SHOW TABLES LIKE %oicemail%"'''
+    expect: ALLOW
+  - command: 'runagent -m nethvoice9 podman exec mariadb sh -c ''mysql -uroot -p${MARIADB_ROOT_PASSWORD} -N -B asterisk -e "SHOW TABLES"'''
     expect: ALLOW
   - command: "asterisk -rx 'module show like pjsip'"
     expect: ALLOW
@@ -285,6 +311,10 @@ ask:
     expect: ASK
   - command: "runagent -m mail1 podman inspect postfix"
     expect: ASK
+  - command: "runagent -m mail1 podman inspect postfix --format '{{json .Config.Env}}'"
+    expect: ASK
+  - command: "runagent -m mail1 podman image inspect ghcr.io/nethserver/mail:latest"
+    expect: ASK
   - command: "runagent -m mail1 podman logs --follow postfix"
     expect: ASK
   - command: "runagent -m mail1 podman logs -f postfix"
@@ -308,6 +338,10 @@ ask:
   - command: "remove-module mail1"
     expect: ASK
   - command: "runagent -m nethvoice1 podman exec freepbx getent hosts ibm.com"
+    expect: ASK
+  - command: "runagent -m nethvoice9 podman exec freepbx printenv"
+    expect: ASK
+  - command: "runagent -m nethvoice9 podman exec freepbx grep password /run/secrets/database"
     expect: ASK
   - command: "runagent -m nethvoice1 podman exec freepbx asterisk -rx 'database del AMPUSER/ cidname'"
     expect: ASK
@@ -336,6 +370,16 @@ ask:
   - command: "pgrep --signal TERM asterisk"
     expect: ASK
   - command: "/usr/bin/mysql --defaults-file=/root/.my.cnf -N --batch asterisk -e \"UPDATE users SET name='changed'\""
+    expect: ASK
+  - command: 'runagent -m nethvoice9 podman exec mariadb sh -c ''mysql -uroot -p${MARIADB_ROOT_PASSWORD} -N -B asterisk -e "INSERT INTO voicemail_users VALUES (1)"'''
+    expect: ASK
+  - command: 'runagent -m nethvoice9 podman exec mariadb sh -c ''mysql -uroot -p${MARIADB_ROOT_PASSWORD} -N -B asterisk -e "UPDATE voicemail_users SET attach=yes"'''
+    expect: ASK
+  - command: 'runagent -m nethvoice9 podman exec mariadb sh -c ''mysql -uroot -p${MARIADB_ROOT_PASSWORD} -N -B asterisk -e "TRUNCATE TABLE voicemail_users"'''
+    expect: ASK
+  - command: 'runagent -m nethvoice9 podman exec mariadb sh -c ''mysql -uroot -p${MARIADB_ROOT_PASSWORD} -N -B asterisk -e "DELETE FROM voicemail_users"'''
+    expect: ASK
+  - command: 'runagent -m nethvoice9 podman exec mariadb sh -c ''mysql -uroot -p${MARIADB_ROOT_PASSWORD} -N -B asterisk -e "SHOW VARIABLES"'''
     expect: ASK
   - command: "/usr/bin/mysql --defaults-file=/root/.my.cnf -N --batch asterisk -e \"SELECT SLEEP(10) FROM users\""
     expect: ASK

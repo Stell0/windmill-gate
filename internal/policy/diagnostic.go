@@ -7,10 +7,13 @@ import (
 )
 
 var validators = map[string]func([]shellWord) bool{
-	"diagnostic_read": validateDiagnosticRead,
-	"mysql_select":    validateMySQLSelect,
-	"rtpengine_read":  validateRTPengineRead,
-	"uid_journal":     validateUIDJournal,
+	"container_grep":   validateContainerGrep,
+	"diagnostic_read":  validateDiagnosticRead,
+	"mysql_read":       validateMySQLRead,
+	"mysql_select":     validateMySQLSelect,
+	"mysql_shell_read": validateMySQLShellRead,
+	"rtpengine_read":   validateRTPengineRead,
+	"uid_journal":      validateUIDJournal,
 }
 
 func validateDiagnosticRead(words []shellWord) bool {
@@ -113,6 +116,11 @@ func validateTail(arguments []shellWord) bool {
 }
 
 func validateGrep(arguments []shellWord) bool {
+	operands, ok := parseGrepOperands(arguments)
+	return ok && logOperands(operands)
+}
+
+func parseGrepOperands(arguments []shellWord) ([]shellWord, bool) {
 	booleanShort := "EFGPiwxzsvbHhnoqalLIrRUZ"
 	booleanLong := map[string]bool{
 		"--basic-regexp": true, "--extended-regexp": true, "--fixed-strings": true,
@@ -145,18 +153,18 @@ func validateGrep(arguments []shellWord) bool {
 			name, attached, hasAttached := strings.Cut(argument, "=")
 			if booleanLong[name] {
 				if hasAttached {
-					return false
+					return nil, false
 				}
 				continue
 			}
 			if !valueLong[name] {
-				return false
+				return nil, false
 			}
 			value := attached
 			if !hasAttached {
 				index++
 				if index >= len(arguments) {
-					return false
+					return nil, false
 				}
 				value = arguments[index].value
 			}
@@ -164,7 +172,7 @@ func validateGrep(arguments []shellWord) bool {
 				patternOptions++
 			} else if strings.Contains(name, "context") || name == "--max-count" {
 				if !decimal(value, true) {
-					return false
+					return nil, false
 				}
 			}
 			continue
@@ -177,7 +185,7 @@ func validateGrep(arguments []shellWord) bool {
 					if value == "" {
 						index++
 						if index >= len(arguments) {
-							return false
+							return nil, false
 						}
 						value = arguments[index].value
 					}
@@ -185,14 +193,14 @@ func validateGrep(arguments []shellWord) bool {
 						patternOptions++
 					} else if flag == 'm' || flag == 'A' || flag == 'B' || flag == 'C' {
 						if !decimal(value, true) {
-							return false
+							return nil, false
 						}
 					}
 					position = len(argument)
 					continue
 				}
 				if !strings.ContainsRune(booleanShort, rune(flag)) {
-					return false
+					return nil, false
 				}
 			}
 			continue
@@ -201,11 +209,46 @@ func validateGrep(arguments []shellWord) bool {
 	}
 	if patternOptions == 0 {
 		if len(operands) < 2 {
-			return false
+			return nil, false
 		}
 		operands = operands[1:]
 	}
-	return logOperands(operands)
+	return operands, len(operands) > 0
+}
+
+func validateContainerGrep(words []shellWord) bool {
+	if len(words) < 9 ||
+		words[0].value != "runagent" || words[1].value != "-m" ||
+		!cleanLiteral(words[2].value) || words[3].value != "podman" ||
+		words[4].value != "exec" || !cleanLiteral(words[5].value) ||
+		words[6].value != "grep" {
+		return false
+	}
+	operands, ok := parseGrepOperands(words[7:])
+	if !ok {
+		return false
+	}
+	for _, operand := range operands {
+		if !containerGrepPath(operand.value) {
+			return false
+		}
+	}
+	return true
+}
+
+func containerGrepPath(value string) bool {
+	if !cleanPath(value, false) || !path.IsAbs(value) {
+		return false
+	}
+	if pathWithin(value, "/var/log") {
+		return true
+	}
+	return pathWithin(value, "/app") && strings.HasSuffix(value, ".js") ||
+		pathWithin(value, "/etc/asterisk") && strings.HasSuffix(value, ".conf")
+}
+
+func pathWithin(value, root string) bool {
+	return value == root || strings.HasPrefix(value, root+"/")
 }
 
 func validatePgrep(arguments []shellWord) bool {

@@ -2,21 +2,83 @@ package policy
 
 import "strings"
 
+func validateMySQLRead(words []shellWord) bool {
+	query, ok := directMySQLQuery(words)
+	return ok && validateReadOnlySQL(query)
+}
+
+// validateMySQLSelect preserves the narrower behavior of existing external
+// policies that already refer to the original validator name.
 func validateMySQLSelect(words []shellWord) bool {
+	query, ok := directMySQLQuery(words)
+	return ok && validateSelectSQL(query)
+}
+
+func directMySQLQuery(words []shellWord) (string, bool) {
 	if len(words) != 7 ||
 		words[0].value != "/usr/bin/mysql" ||
 		words[1].value != "--defaults-file=/root/.my.cnf" ||
 		words[2].value != "-N" ||
 		words[3].value != "--batch" ||
-		words[4].value != "asterisk" ||
+		!allowedVoiceDatabase(words[4].value) ||
 		words[5].value != "-e" {
-		return false
+		return "", false
 	}
 	query := words[6]
-	if query.quote != '"' || query.mixed {
+	if (query.quote != '"' && query.quote != '\'') || query.mixed {
+		return "", false
+	}
+	return query.value, true
+}
+
+func validateMySQLShellRead(words []shellWord) bool {
+	if len(words) != 9 ||
+		words[0].value != "runagent" || words[1].value != "-m" ||
+		!cleanLiteral(words[2].value) || words[3].value != "podman" ||
+		words[4].value != "exec" || words[5].value != "mariadb" ||
+		words[6].value != "sh" || words[7].value != "-c" ||
+		words[8].quote != '\'' || words[8].mixed {
 		return false
 	}
-	tokens, ok := scanSQL(query.value)
+	const prefix = `mysql -uroot -p${MARIADB_ROOT_PASSWORD} -N -B `
+	command := words[8].value
+	if !strings.HasPrefix(command, prefix) {
+		return false
+	}
+	command = strings.TrimPrefix(command, prefix)
+	database, command, found := strings.Cut(command, " -e ")
+	if !found || !allowedVoiceDatabase(database) {
+		return false
+	}
+	query, ok := quotedShellQuery(command)
+	return ok && validateReadOnlySQL(query)
+}
+
+func quotedShellQuery(value string) (string, bool) {
+	if len(value) >= 2 && value[0] == '"' && value[len(value)-1] == '"' {
+		return value[1 : len(value)-1], true
+	}
+	if len(value) >= 4 && strings.HasPrefix(value, `\"`) && strings.HasSuffix(value, `\"`) {
+		return value[2 : len(value)-2], true
+	}
+	return "", false
+}
+
+func allowedVoiceDatabase(value string) bool {
+	return value == "asterisk" || value == "asteriskcdrdb"
+}
+
+func validateReadOnlySQL(query string) bool {
+	tokens, ok := scanSQL(query)
+	if !ok {
+		return false
+	}
+	parser := sqlParser{tokens: tokens}
+	return parser.readStatement() && parser.atEnd()
+}
+
+func validateSelectSQL(query string) bool {
+	tokens, ok := scanSQL(query)
 	if !ok {
 		return false
 	}
@@ -36,6 +98,7 @@ const (
 	sqlStar
 	sqlDot
 	sqlComparison
+	sqlPattern
 )
 
 type sqlToken struct {
@@ -130,6 +193,12 @@ func scanSQL(query string) ([]sqlToken, bool) {
 				return nil, false
 			}
 			result = append(result, sqlToken{kind: sqlComparison, value: operator})
+		case '%':
+			start := index
+			for index < len(query) && (query[index] == '%' || query[index] == '_' || asciiLetter(query[index]) || asciiDigit(query[index])) {
+				index++
+			}
+			result = append(result, sqlToken{kind: sqlPattern, value: query[start:index]})
 		default:
 			// This excludes statement terminators, comments, variables,
 			// identifier quotes, arithmetic, and client metacommands.
@@ -142,6 +211,64 @@ func scanSQL(query string) ([]sqlToken, bool) {
 type sqlParser struct {
 	tokens []sqlToken
 	index  int
+}
+
+func (p *sqlParser) readStatement() bool {
+	if p.index >= len(p.tokens) || p.tokens[p.index].kind != sqlIdentifier {
+		return false
+	}
+	switch strings.ToUpper(p.tokens[p.index].value) {
+	case "SELECT":
+		return p.selectStatement()
+	case "SHOW":
+		return p.showStatement()
+	case "DESCRIBE", "DESC":
+		return p.describeStatement()
+	default:
+		return false
+	}
+}
+
+func (p *sqlParser) showStatement() bool {
+	if !p.keyword("SHOW") {
+		return false
+	}
+	if p.keyword("TABLES") {
+		if p.keyword("LIKE") {
+			return p.showPattern()
+		}
+		return true
+	}
+	if p.keyword("COLUMNS") || p.keyword("FIELDS") {
+		if !(p.keyword("FROM") || p.keyword("IN")) || !p.identifier() {
+			return false
+		}
+		if p.keyword("LIKE") {
+			return p.showPattern()
+		}
+		return true
+	}
+	if p.keyword("INDEX") || p.keyword("INDEXES") || p.keyword("KEYS") {
+		return (p.keyword("FROM") || p.keyword("IN")) && p.identifier()
+	}
+	if p.keyword("CREATE") {
+		return (p.keyword("TABLE") || p.keyword("VIEW")) && p.identifier()
+	}
+	return false
+}
+
+func (p *sqlParser) describeStatement() bool {
+	if !(p.keyword("DESCRIBE") || p.keyword("DESC")) || !p.identifier() {
+		return false
+	}
+	if p.currentKind(sqlIdentifier) {
+		return p.identifier()
+	}
+	return p.kind(sqlString) || p.kind(sqlPattern) || p.atEnd()
+}
+
+func (p *sqlParser) showPattern() bool {
+	return p.kind(sqlString) || p.kind(sqlPattern)
 }
 
 func (p *sqlParser) selectStatement() bool {
@@ -334,7 +461,9 @@ func reservedSQLWord(value string) bool {
 	case "SELECT", "FROM", "WHERE", "ORDER", "BY", "LIMIT", "OFFSET",
 		"AND", "OR", "AS", "ASC", "DESC", "LIKE", "IS", "NOT", "NULL",
 		"TRUE", "FALSE", "JOIN", "INNER", "LEFT", "RIGHT", "CROSS", "ON",
-		"UNION", "INTO", "OUTFILE", "DUMPFILE", "FOR", "LOCK", "PROCEDURE":
+		"UNION", "INTO", "OUTFILE", "DUMPFILE", "FOR", "LOCK", "PROCEDURE",
+		"SHOW", "TABLES", "COLUMNS", "FIELDS", "INDEX", "INDEXES", "KEYS",
+		"CREATE", "TABLE", "VIEW", "DESCRIBE", "IN":
 		return true
 	default:
 		return false
