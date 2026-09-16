@@ -8,14 +8,16 @@
 validated_allow:
   # These families need argument-level checks that a regular expression alone
   # cannot express. Validators inspect but never rewrite the approved payload.
+  # Permit only a quoted, forward, at-most-1000-line print range from the
+  # observed non-secret endpoint file. Other sed programs and paths remain ASK.
+  - regexp: '^sed -n (?:"[0-9]+,[0-9]+p"|''[0-9]+,[0-9]+p'') /etc/asterisk/pjsip\.endpoint\.conf$'
+    validator: asterisk_config_slice
   - regexp: '^(?:ls|cat|tail|grep|egrep|pgrep)(?: .*)?$'
     validator: diagnostic_read
   # Container grep accepts multiple files only inside application, Asterisk,
   # and log trees, rather than exposing arbitrary paths or secret mounts.
   - regexp: '^runagent -m [a-zA-Z0-9][a-zA-Z0-9_.-]* podman exec [a-zA-Z0-9][a-zA-Z0-9_.-]* grep(?: .*)?$'
     validator: container_grep
-  - regexp: '^/usr/bin/mysql(?: .*)?$'
-    validator: mysql_read
   # The MariaDB image obtains its password through this fixed shell wrapper.
   # The validator checks both the complete wrapper and the read-only SQL.
   - regexp: '^runagent -m [a-zA-Z0-9][a-zA-Z0-9_.-]* podman exec mariadb sh -c .+$'
@@ -131,10 +133,11 @@ allow:
   - '^redis-cli --raw HGET (?:"module/[a-zA-Z0-9][a-zA-Z0-9_.-]*/environment"|module/[a-zA-Z0-9][a-zA-Z0-9_.-]*/environment) IMAGE_URL$'
 
   # NethVoice checks execute only exact read-only commands inside freepbx.
+  # Database reads use the separately validated mariadb wrapper above.
   - '^runagent -m [a-zA-Z0-9][a-zA-Z0-9_.-]* podman exec freepbx (?:cat /etc/resolv\.conf|pgrep asterisk)$'
   - '^runagent -m [a-zA-Z0-9][a-zA-Z0-9_.-]* podman exec freepbx asterisk -rx ''(?:pjsip show contacts|pjsip show transports|database show AMPUSER|database show CF|queue show|voicemail show user [a-zA-Z0-9][a-zA-Z0-9_.+-]*@[a-zA-Z0-9][a-zA-Z0-9_.-]*)''$'
   - '^mysql --version$'
-  - '^asterisk -rx (?:"(?:module show|core show|database show|pjsip show)(?: [a-zA-Z0-9][a-zA-Z0-9_.:/@*-]*)*"|''(?:module show|core show|database show|pjsip show)(?: [a-zA-Z0-9][a-zA-Z0-9_.:/@*-]*)*'')$'
+  - '^asterisk -rx (?:"(?:module show|core show|database show|pjsip show|config show help)(?: [a-zA-Z0-9][a-zA-Z0-9_.:/@*-]*)*"|''(?:module show|core show|database show|pjsip show|config show help)(?: [a-zA-Z0-9][a-zA-Z0-9_.:/@*-]*)*'')$'
 
   # Gate-managed web forwards remain target-scoped and loopback-only.
   - '^gate forward add --remote-port (?:80|443)$'

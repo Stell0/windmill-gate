@@ -202,6 +202,10 @@ shell composition, and supported NS8 wrappers. Unmatched or malformed commands
 remain `ASK` unless a deny rule matches. Classification never rewrites the
 approved command.
 
+For NethVoice, bounded database reads run through the `mariadb` container's
+fixed credential wrapper. Direct MySQL commands in `freepbx` are not part of
+the default allow policy.
+
 Analyze audit history for possible persistent policy improvements with:
 
 ```bash

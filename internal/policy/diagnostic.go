@@ -2,18 +2,45 @@ package policy
 
 import (
 	"path"
+	"strconv"
 	"strings"
 	"unicode"
 )
 
 var validators = map[string]func([]shellWord) bool{
-	"container_grep":   validateContainerGrep,
-	"diagnostic_read":  validateDiagnosticRead,
-	"mysql_read":       validateMySQLRead,
-	"mysql_select":     validateMySQLSelect,
-	"mysql_shell_read": validateMySQLShellRead,
-	"rtpengine_read":   validateRTPengineRead,
-	"uid_journal":      validateUIDJournal,
+	"asterisk_config_slice": validateAsteriskConfigSlice,
+	"container_grep":        validateContainerGrep,
+	"diagnostic_read":       validateDiagnosticRead,
+	"mysql_read":            validateMySQLRead,
+	"mysql_select":          validateMySQLSelect,
+	"mysql_shell_read":      validateMySQLShellRead,
+	"rtpengine_read":        validateRTPengineRead,
+	"uid_journal":           validateUIDJournal,
+}
+
+func validateAsteriskConfigSlice(words []shellWord) bool {
+	if len(words) != 4 ||
+		words[0].value != "sed" || words[1].value != "-n" ||
+		(words[2].quote != '\'' && words[2].quote != '"') || words[2].mixed {
+		return false
+	}
+
+	expression := words[2].value
+	if !strings.HasSuffix(expression, "p") {
+		return false
+	}
+	startText, endText, found := strings.Cut(strings.TrimSuffix(expression, "p"), ",")
+	if !found {
+		return false
+	}
+	start, startErr := strconv.ParseUint(startText, 10, 32)
+	end, endErr := strconv.ParseUint(endText, 10, 32)
+	if startErr != nil || endErr != nil || start == 0 || end < start || end-start >= 1000 {
+		return false
+	}
+
+	filename := words[3].value
+	return cleanPath(filename, false) && filename == "/etc/asterisk/pjsip.endpoint.conf"
 }
 
 func validateDiagnosticRead(words []shellWord) bool {

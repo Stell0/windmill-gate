@@ -189,7 +189,8 @@ local provider.
 
 ## NethVoice checks
 
-Use exact, read-only commands in the `freepbx` container:
+Use exact, read-only Asterisk commands in the `freepbx` container. Run database
+queries in the separate `mariadb` container:
 
 ```bash
 runagent -m <nethvoice-module-id> podman exec freepbx pgrep -af asterisk
@@ -197,15 +198,21 @@ runagent -m <nethvoice-module-id> podman exec freepbx asterisk -rx 'pjsip show t
 runagent -m <nethvoice-module-id> podman exec freepbx asterisk -rx 'pjsip show contacts'
 runagent -m <nethvoice-module-id> podman exec freepbx asterisk -rx 'core show channels concise'
 runagent -m <nethvoice-module-id> podman exec freepbx stat -c '%n %s %y' /etc/asterisk/pjsip.conf /etc/asterisk/extensions.conf
-runagent -m <nethvoice-module-id> podman exec freepbx /usr/bin/mysql --defaults-file=/root/.my.cnf -N --batch asterisk -e "SELECT extension,name FROM users ORDER BY extension LIMIT 100"
+runagent -m <nethvoice-module-id> podman exec freepbx sed -n '1,200p' /etc/asterisk/pjsip.endpoint.conf
+runagent -m <nethvoice-module-id> podman exec mariadb sh -c 'mysql -uroot -p${MARIADB_ROOT_PASSWORD} -N -B asterisk -e "SELECT extension,name FROM users ORDER BY extension LIMIT 100"'
 ```
 
 The Asterisk CLI policy accepts only quoted commands beginning with `module
-show`, `core show`, `database show`, or `pjsip show`, plus the existing exact
-`queue show` check. The MySQL form above is parsed as one SELECT over one normal
-table. Joins, unions, subqueries, variables, comments, writes, output/locking
-clauses, unrecognized functions, alternate credentials/options/databases, and
-unsafe shell quoting require an operator decision.
+show`, `core show`, `database show`, or `pjsip show`, plus exact `queue show`
+and `config show help` checks. The `sed` form is limited to a quoted forward
+range of at most 1,000 lines in `pjsip.endpoint.conf`; other programs and files
+remain subject to operator review. The MariaDB form above is parsed as one
+SELECT over one normal table and must retain the exact password-variable
+wrapper. Joins, unions, subqueries, variables, comments, writes,
+output/locking clauses, unrecognized functions, alternate
+credentials/options/databases, and unsafe shell quoting require an operator
+decision. Do not look for `/usr/bin/mysql` in `freepbx`; NethVoice keeps the
+database client and root password in the `mariadb` container.
 
 A live Asterisk PID plus configured transports and available contacts establishes
 increasingly stronger evidence: process alive, signaling listeners configured,

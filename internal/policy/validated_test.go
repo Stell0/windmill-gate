@@ -2,6 +2,32 @@ package policy
 
 import "testing"
 
+func TestValidatedAsteriskConfigSlice(t *testing.T) {
+	engine, err := New(Config{ValidatedAllow: []ValidatedRule{{
+		Regexp:    `^sed -n (?:"[0-9]+,[0-9]+p"|'[0-9]+,[0-9]+p') /etc/asterisk/pjsip\.endpoint\.conf$`,
+		Validator: "asterisk_config_slice",
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := map[string]Decision{
+		`sed -n '11275,11325p' /etc/asterisk/pjsip.endpoint.conf`:    Allow,
+		`sed -n "1,1000p" /etc/asterisk/pjsip.endpoint.conf`:         Allow,
+		`sed -n '100,99p' /etc/asterisk/pjsip.endpoint.conf`:         Ask,
+		`sed -n '1,1001p' /etc/asterisk/pjsip.endpoint.conf`:         Ask,
+		`sed -n '1,20p' /etc/asterisk/pjsip.auth.conf`:               Ask,
+		`sed -n '1,20p' /etc/asterisk/subdir/pjsip.conf`:             Ask,
+		`sed -n '1,20p' /etc/asterisk/../shadow.conf`:                Ask,
+		`sed -i '1,20p' /etc/asterisk/pjsip.endpoint.conf`:           Ask,
+		`sed -n '1,20w /tmp/copy' /etc/asterisk/pjsip.endpoint.conf`: Ask,
+	}
+	for command, expected := range tests {
+		if actual := engine.Evaluate("gt_test", command).Decision; actual != expected {
+			t.Errorf("Evaluate(%q) = %s, want %s", command, actual, expected)
+		}
+	}
+}
+
 func TestValidatedDiagnosticReads(t *testing.T) {
 	engine, err := New(Config{ValidatedAllow: []ValidatedRule{{
 		Regexp: `^(?:ls|cat|tail|grep|egrep|pgrep)(?: .*)?$`, Validator: "diagnostic_read",

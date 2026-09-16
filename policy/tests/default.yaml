@@ -163,6 +163,8 @@ allow:
     expect: ALLOW
   - command: "runagent -m nethvoice1 podman exec freepbx pgrep asterisk"
     expect: ALLOW
+  - command: "runagent -m nethvoice5 podman exec freepbx pgrep -af asterisk"
+    expect: ALLOW
   - command: "runagent -m nethvoice1 podman exec freepbx asterisk -rx 'pjsip show contacts'"
     expect: ALLOW
   - command: "runagent -m nethvoice1 podman exec freepbx asterisk -rx 'database show CF'"
@@ -193,13 +195,9 @@ allow:
     expect: ALLOW
   - command: "runagent -m nethvoice1 podman exec freepbx tail --lines=5000 /var/log/asterisk/full"
     expect: ALLOW
-  - command: "/usr/bin/mysql --defaults-file=/root/.my.cnf -N --batch asterisk -e \"SELECT id,extension,UPPER(name) AS upper_name FROM users WHERE enabled = 1 AND extension = '100' ORDER BY extension LIMIT 100\""
-    expect: ALLOW
-  - command: "runagent -m nethvoice1 podman exec freepbx /usr/bin/mysql --defaults-file=/root/.my.cnf -N --batch asterisk -e \"SELECT REPLACE(name,'old','new') FROM users WHERE extension <> '' ORDER BY extension DESC LIMIT 0,50\""
-    expect: ALLOW
-  - command: "runagent -m nethvoice9 podman exec freepbx /usr/bin/mysql --defaults-file=/root/.my.cnf -N --batch asterisk -e 'SELECT mailboxuser FROM voicemessages WHERE id=2571 LIMIT 1'"
-    expect: ALLOW
   - command: 'runagent -m nethvoice9 podman exec mariadb sh -c ''mysql -uroot -p${MARIADB_ROOT_PASSWORD} -N -B asterisk -e "SELECT mailboxuser FROM voicemessages WHERE id=2571 LIMIT 1"'''
+    expect: ALLOW
+  - command: 'runagent -m nethvoice5 podman exec mariadb sh -c ''mysql -uroot -p${MARIADB_ROOT_PASSWORD} -N -B asterisk -e "SELECT extension,name FROM users ORDER BY extension LIMIT 100"'''
     expect: ALLOW
   - command: 'runagent -m nethvoice9 podman exec mariadb sh -c ''mysql -uroot -p${MARIADB_ROOT_PASSWORD} -N -B asteriskcdrdb -e "SELECT mailboxuser FROM voicemessages WHERE id=2571 LIMIT 1"'''
     expect: ALLOW
@@ -213,11 +211,37 @@ allow:
     expect: ALLOW
   - command: "runagent -m nethvoice1 podman exec freepbx asterisk -rx 'core show channels concise'"
     expect: ALLOW
+  - command: "runagent -m nethvoice5 podman exec freepbx asterisk -rx 'core show uptime'"
+    expect: ALLOW
   - command: "runagent -m nethvoice1 podman exec freepbx asterisk -rx 'pjsip show endpoint 100'"
+    expect: ALLOW
+  - command: "runagent -m nethvoice5 podman exec freepbx asterisk -rx 'pjsip show endpoints'"
+    expect: ALLOW
+  - command: "runagent -m nethvoice5 podman exec freepbx asterisk -rx 'pjsip show aor OpenAI_CleverAI'"
+    expect: ALLOW
+  - command: "runagent -m nethvoice5 podman exec freepbx asterisk -rx 'pjsip show auth OpenAI_CleverAI'"
+    expect: ALLOW
+  - command: "runagent -m nethvoice5 podman exec freepbx asterisk -rx 'pjsip show registrations'"
+    expect: ALLOW
+  - command: "runagent -m nethvoice5 podman exec freepbx asterisk -rx 'pjsip show auths'"
+    expect: ALLOW
+  - command: "runagent -m nethvoice5 podman exec freepbx asterisk -rx 'pjsip show identifies'"
+    expect: ALLOW
+  - command: "runagent -m nethvoice5 podman exec freepbx asterisk -rx 'pjsip show contact OpenAI_CleverAI/sip:sip.api.openai.com:5061'"
+    expect: ALLOW
+  - command: "runagent -m nethvoice5 podman exec freepbx asterisk -rx 'pjsip show transport 0.0.0.0-tls'"
+    expect: ALLOW
+  - command: "runagent -m nethvoice5 podman exec freepbx asterisk -rx 'config show help res_pjsip transport allow_wildcard_certs'"
     expect: ALLOW
   - command: "runagent -m nethvoice1 podman exec freepbx asterisk -rx 'queue show'"
     expect: ALLOW
   - command: "runagent -m nethvoice1 podman exec freepbx stat -c '%n %s %y' /etc/asterisk/extensions.conf /etc/asterisk/pjsip.conf"
+    expect: ALLOW
+  - command: "runagent -m nethvoice5 podman exec freepbx sed -n '11275,11325p' /etc/asterisk/pjsip.endpoint.conf"
+    expect: ALLOW
+  - command: "runagent -m nethvoice5 podman exec freepbx tail -n 500 /var/log/asterisk/full"
+    expect: ALLOW
+  - command: "runagent -m nethvoice5 podman exec freepbx tail -n 500 /var/log/asterisk/full-20260916"
     expect: ALLOW
   - command: "runagent -m nethvoice-proxy7 podman exec rtpengine rtpengine-ctl --help"
     expect: ALLOW
@@ -345,6 +369,14 @@ ask:
     expect: ASK
   - command: "runagent -m nethvoice1 podman exec freepbx asterisk -rx 'database del AMPUSER/ cidname'"
     expect: ASK
+  - command: "runagent -m nethvoice5 podman exec freepbx /usr/bin/mysql --defaults-file=/root/.my.cnf -N --batch asterisk -e \"SELECT id,keyword,flags,type FROM pjsip WHERE id LIKE 'OpenAI_CleverAI%'\""
+    expect: ASK
+  - command: "/usr/bin/mysql --defaults-file=/root/.my.cnf -N --batch asterisk -e \"SELECT id,extension,UPPER(name) AS upper_name FROM users WHERE enabled = 1 AND extension = '100' ORDER BY extension LIMIT 100\""
+    expect: ASK
+  - command: "runagent -m nethvoice5 podman exec freepbx sh -c 'grep -R -n -A25 -B2 \"^\\[0.0.0.0-tls\\]\" /etc/asterisk/pjsip*.conf'"
+    expect: ASK
+  - command: "runagent -m nethvoice5 timeout 12 openssl s_client -connect sip.api.openai.com:5061 -servername sip.api.openai.com -verify_hostname sip.api.openai.com -verify_return_error < /dev/null 2>&1"
+    expect: ASK
   - command: "ls /var/log/*"
     expect: ASK
   - command: "ls /var/log/../root"
@@ -397,9 +429,13 @@ ask:
     expect: ASK
   - command: "runagent -m nethvoice1 podman exec freepbx asterisk -rx 'core set verbose 9'"
     expect: ASK
+  - command: "runagent -m nethvoice1 podman exec freepbx asterisk -rx 'config reload /etc/asterisk/pjsip.conf'"
+    expect: ASK
   - command: "runagent -m nethvoice1 podman exec freepbx asterisk -rx 'database put AMPUSER 100 secret'"
     expect: ASK
   - command: "runagent -m nethvoice1 podman exec freepbx stat -c '%n %s %y' /etc/asterisk/../shadow"
+    expect: ASK
+  - command: "runagent -m nethvoice1 podman exec freepbx sed -n '1,1001p' /etc/asterisk/pjsip.endpoint.conf"
     expect: ASK
   - command: "runagent -m nethvoice-proxy7 podman exec rtpengine rtpengine-ctl list sessions all"
     expect: ASK
