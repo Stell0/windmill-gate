@@ -3,12 +3,13 @@ package review
 import (
 	"context"
 	"fmt"
-	"github.com/stell0/windmill-gate/internal/policy"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/stell0/windmill-gate/internal/policy"
 )
 
 func TestApplyCandidatesAddsRulesAndBoundaryTests(t *testing.T) {
@@ -97,19 +98,23 @@ func TestWorkflowRejectsCandidateNotDerivedFromSafeHistory(t *testing.T) {
 }
 
 type recordingRunner struct {
-	calls     []string
-	policy    string
-	tests     string
-	body      string
-	existing  string
-	failCheck string
-	checks    []string
-	mutate    bool
+	diffOutput string
+	calls      []string
+	policy     string
+	tests      string
+	body       string
+	existing   string
+	failCheck  string
+	checks     []string
+	mutate     bool
 }
 
 func (r *recordingRunner) Run(ctx context.Context, directory, name string, args ...string) (string, error) {
 	call := name + " " + strings.Join(args, " ")
 	r.calls = append(r.calls, call)
+	if name == "git" && len(args) > 1 && args[0] == "diff" && r.diffOutput != "" {
+		return r.diffOutput, nil
+	}
 	if name == "make" || name == "go" {
 		r.checks = append(r.checks, call)
 		if call == r.failCheck {
@@ -243,5 +248,20 @@ func TestEquivalentOpenPRIsReused(t *testing.T) {
 	calls := strings.Join(runner.calls, "\n")
 	if strings.Contains(calls, "checkout -b") || strings.Contains(calls, "git push") || strings.Contains(calls, "gh pr create") {
 		t.Fatal(calls)
+	}
+}
+
+func TestPreflightPathNamesUseUnambiguousNULFraming(t *testing.T) {
+	source := workflowSource(t, false)
+	c, _ := generalize("free -m")
+	c.Examples = []string{"free -m"}
+	c.Approvals = 3
+	c.Targets = 2
+	for _, extra := range []string{"unexpected.txt", "policy/default.yaml\nREADME.md"} {
+		runner := &recordingRunner{diffOutput: "policy/default.yaml\x00policy/tests/default.yaml\x00" + extra + "\x00"}
+		_, err := (Workflow{Runner: runner}).Propose(context.Background(), Config{PolicyRepository: source, BaseBranch: "main", PolicyPath: "policy/default.yaml", TestsPath: "policy/tests/default.yaml", MinimumApprovals: 3}, []Candidate{c}, "")
+		if err == nil || strings.Contains(strings.Join(runner.calls, "\n"), "git push") {
+			t.Fatalf("unexpected framed path was accepted: %q %v", extra, err)
+		}
 	}
 }

@@ -316,7 +316,7 @@ make test
 make test-race
 ```
 
-Pushing a tag such as `v0.4.0` runs the release workflow. It tests Gate on Linux
+Pushing a tag such as `v0.4.0` runs the release workflow. It tests Gate on Linux, macOS
 and Windows and publishes checksum-protected Linux, macOS, and Windows archives
 for AMD64 and ARM64. See [PLAN.md](PLAN.md) for design details and
 [AGENTS.md](AGENTS.md) for repository rules.

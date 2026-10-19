@@ -194,12 +194,12 @@ func (w Workflow) Propose(ctx context.Context, config Config, candidates []Candi
 		return Proposal{}, errors.New("upstream preflight changed validated proposal bytes")
 	}
 	// Only these two files may differ. Never commit generated artifacts or secrets.
-	changed, err := w.Runner.Run(ctx, checkout, "git", "diff", "--name-only")
+	changed, err := w.Runner.Run(ctx, checkout, "git", "diff", "--name-only", "-z")
 	if err != nil {
 		return Proposal{}, err
 	}
-	for _, path := range strings.Split(strings.TrimSpace(changed), "\n") {
-		if path != "" && path != config.PolicyPath && path != config.TestsPath {
+	for _, path := range strings.Split(changed, "\x00") {
+		if path != "" && path != filepath.ToSlash(filepath.Clean(config.PolicyPath)) && path != filepath.ToSlash(filepath.Clean(config.TestsPath)) {
 			return Proposal{}, errors.New("upstream preflight modified an unexpected file")
 		}
 	}

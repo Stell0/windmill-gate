@@ -634,5 +634,34 @@ The extra cross-platform build/fuzz attempt initially hit /tmp disk quota; only
 this task's verification cache was moved into ignored `bin/verification` for retry.
 Full release-archive verification and implementation CI results remain pending.
 Do not mark final acceptance complete: a refreshed authorized harness catalog and
-a real two-session evidence/procedure round trip are still required, as is the
-requested disposable hosting integration proof. No active policy is changed.
+a real two-session evidence/procedure round trip are still required, with native CI results still required. No active policy is changed.
+
+
+The first implementation CI run [39226319780](https://github.com/Stell0/windmill-gate/actions/runs/39226319780)
+passes Linux Go/distribution checks but fails Windows proposal tests: Git's
+line-delimited path output leaves carriage returns on intermediate filenames.
+The correction uses NUL-delimited Git paths and canonical configured paths;
+unexpected filenames containing newlines remain rejected. The complete local
+mandatory suites pass after this fix. CI now also exercises native macOS Go and
+installer behavior, plus Linux race boundaries.
+
+All six Linux/macOS/Windows AMD64/ARM64 archives build and pass checksum,
+canonical-skill/reference and default-discovery checks. The native Linux archive
+binary runs. Cross-building initially needed a writable task-local module cache
+for Windows dependencies; no system cache/configuration is changed. Temporary
+build directories are isolated from Go's package scan, and socket test paths use
+a short private verification alias. All verification files remain ignored.
+
+The real private [disposable policy PR](https://github.com/Stell0/gate-policy-review-acceptance-20261019-c8b4b0/pull/1)
+is created from three synthetic successful manual approvals across two named
+fixture targets. Its proposed branch passes 146 generated policy tests after
+fetch, and the complete bundled/adversarial differential checks run before its
+actual commit/push. A repeated automatic invocation returns the same branch/URL.
+Local active policy and upstream main bytes remain unchanged, and the PR body
+contains no private backend fixture value. The repository and PR are explicitly
+labelled synthetic acceptance artifacts and remain unmerged; they grant no
+production execution authority. No C0 memory is used for policy evidence.
+
+Remaining final acceptance: refreshed connected-harness C0 operations and an
+actual two-session evidence/procedure persistence/reuse test. The implementation
+PR remains a draft, and CI for the portability correction is pending.
