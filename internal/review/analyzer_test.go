@@ -2,6 +2,7 @@ package review
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -112,9 +113,15 @@ func FuzzGeneralizedComposition(f *testing.F) {
 		engine, _ := policy.New(policy.Config{Allow: []string{c.Pattern}})
 		value := "journalctl -u redis -n 100" + suffix
 		if engine.Evaluate("gt", value).Decision == policy.Allow {
-			derived, ok := generalize(value)
-			if !ok || derived.Pattern != c.Pattern {
-				t.Fatalf("unsafe extension allowed: %q", value)
+			// Independent numeric semantics, rather than deriving the same rule
+			// again: only a canonical decimal count of 1..1000 may be accepted.
+			words := strings.Split(value, " ")
+			if len(words) != 5 || strings.Join(words[:4], " ") != "journalctl -u redis -n" {
+				t.Fatalf("extra command structure allowed: %q", value)
+			}
+			count, err := strconv.ParseUint(words[4], 10, 64)
+			if err != nil || count < 1 || count > 1000 || strconv.FormatUint(count, 10) != words[4] {
+				t.Fatalf("unsafe count extension allowed: %q", value)
 			}
 		}
 	})

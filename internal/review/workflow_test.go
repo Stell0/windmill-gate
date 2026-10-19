@@ -141,10 +141,7 @@ func (r *recordingRunner) Run(ctx context.Context, directory, name string, args 
 		r.tests = string(data)
 		return "https://example.invalid/pull/1", nil
 	}
-	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.Dir = directory
-	output, err := cmd.CombinedOutput()
-	return strings.TrimSpace(string(output)), err
+	return (ExecRunner{}).Run(ctx, directory, name, args...)
 }
 
 func TestRejectUnboundedRuleEvenWithCuratedTests(t *testing.T) {
@@ -263,5 +260,22 @@ func TestPreflightPathNamesUseUnambiguousNULFraming(t *testing.T) {
 		if err == nil || strings.Contains(strings.Join(runner.calls, "\n"), "git push") {
 			t.Fatalf("unexpected framed path was accepted: %q %v", extra, err)
 		}
+	}
+}
+
+func TestExecRunnerKeepsWarningsOutOfPathData(t *testing.T) {
+	if os.Getenv("GATE_REVIEW_RUNNER_CHILD") == "1" {
+		fmt.Fprint(os.Stdout, "policy/default.yaml\x00policy/tests/default.yaml\x00")
+		fmt.Fprintln(os.Stderr, "fixture git line-ending warning")
+		os.Exit(0)
+	}
+	t.Setenv("GATE_REVIEW_RUNNER_CHILD", "1")
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := (ExecRunner{}).Run(context.Background(), "", executable, "-test.run=^TestExecRunnerKeepsWarningsOutOfPathData$")
+	if err != nil || output != "policy/default.yaml\x00policy/tests/default.yaml\x00" {
+		t.Fatalf("stderr contaminated framed stdout: %q %v", output, err)
 	}
 }

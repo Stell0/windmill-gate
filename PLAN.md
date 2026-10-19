@@ -665,3 +665,15 @@ production execution authority. No C0 memory is used for policy evidence.
 Remaining final acceptance: refreshed connected-harness C0 operations and an
 actual two-session evidence/procedure persistence/reuse test. The implementation
 PR remains a draft, and CI for the portability correction is pending.
+
+
+The first portability rerun [39226918375](https://github.com/Stell0/windmill-gate/actions/runs/39226918375)
+passes native macOS Go/installer checks and Linux Go/race/installer checks but
+retains the Windows fixture failure. The first line-ending diagnosis was incomplete:
+the recording test runner used CombinedOutput, mixing Git's line-ending warnings
+from stderr into filename data; the production runner already isolates streams.
+The fixture now delegates real commands to the production ExecRunner, with a
+subprocess regression proving warnings cannot contaminate NUL-framed path data.
+The NUL-framing improvement also remains covered for newline-bearing filenames.
+The composition fuzz assertion now independently parses canonical decimal counts
+and passes another 13,275 mutations rather than rederiving its own grammar.
