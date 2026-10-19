@@ -264,6 +264,10 @@ The first implementation should avoid a custom DNS daemon.
 
 Skills live under `skills/` and should be harness-neutral where practical.
 
+If the optional `gate-c0-memory` skill is available and C0 is authorized, use it to retrieve relevant knowledge and preserve useful troubleshooting findings. Follow the skill's instructions. If unavailable, continue normally without persistent memory.
+
+At the end of each support investigation, invoke `gate-policy-review` to review command history, evaluate safe policy improvements and test proposed rules. Report findings even when no change is justified. Never merge or deploy policy changes automatically.
+
 ### `gate-remote-shell`
 
 Must teach an agent to:

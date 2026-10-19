@@ -108,13 +108,36 @@ Gate is now ready for agent-assisted diagnostics.
 
 ## Included skills
 
-The release includes three Gate skills:
+The release enables three Gate skills:
 
 - `gate-remote-shell` runs small, non-interactive production commands through
   Gate.
 - `gate-port-forward` provides controlled access to target HTTP/HTTPS services.
 - `gate-policy-review` proposes narrow policy improvements in a pull request;
-  it never merges or deploys them.
+  it runs before the final support report and never merges or deploys changes.
+
+The canonical optional `gate-c0-memory` skill is included under `skills/` but
+is absent from `.agents/skills` by default. Gate needs no C0 service or credentials.
+To enable memory discovery in a selected installation, with destination absent:
+
+```bash
+cp -R skills/gate-c0-memory .agents/skills/gate-c0-memory
+```
+
+On Windows:
+
+```powershell
+Copy-Item -Recurse -LiteralPath skills\gate-c0-memory -Destination .agents\skills\gate-c0-memory
+```
+
+Disable discovery by removing only that explicitly created directory. Restart
+Codex and check `/skills` after either change. Recopy the canonical skill after
+an upgrade. Other harnesses should register it only in selected installations.
+Authorize C0 through the harness's existing MCP integration and select an
+appropriate authorized knowledge space. Read-only access permits retrieval;
+missing tools, denied access and outages skip writes while diagnostics and
+independent policy review continue. The skill never reads local credentials to
+bypass MCP, and memory has no Gate execution hook or command-approval authority.
 
 The installer also downloads the
 [`nethserver-admin`](https://github.com/NethServer/agents/tree/main/skills/nethserver-admin)
@@ -209,10 +232,25 @@ the default allow policy.
 Analyze audit history for possible persistent policy improvements with:
 
 ```bash
-./gate policy-review analyze
+./gate policy-review analyze --report
 ```
 
-Gate never applies a policy suggestion automatically.
+Gate never applies a policy suggestion automatically. Analysis reports rejected
+and pending evidence without exporting raw rejected command text. The default
+threshold is three distinct successful manual approvals across at least two operator-named Gate
+target contexts. Connection sessions never count as independent support cases;
+the agent must still verify context independence and diagnostic usefulness.
+
+Configure the operator-selected policy repository using
+`config/policy-review.example.yaml`. Set `automated_pr: true` to authorize the
+end-of-session skill to publish eligible tested proposals with
+`gate policy-review propose --automatic --config <path>`. Explicitly requested
+proposals can omit `--automatic`. Without publishing configuration/authority,
+analysis and recommendations still work. Generated rules have bounded grammars,
+positive/negative tests, original-suite regressions and full-engine differential
+checks. Gate source repositories additionally run mandatory Go/distribution/race
+checks. Equivalent pending proposals reuse a stable branch/PR. Active policy
+changes only through separately authorized human review and deployment.
 
 ### Architecture
 

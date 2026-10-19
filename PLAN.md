@@ -30,6 +30,37 @@ include Gate's canonical `skills/` content and `.agents/skills` discovery
 entries. The installer retrieves the external NethServer admin skill from
 `NethServer/agents`; it is not vendored or silently persisted into Gate policy.
 
+## Optional memory and mandatory session review
+
+WG0 prerequisite verified on 19 October 2026: C0 AM6 and final deployment gate
+are accepted on main. Deployed app 0.45.0/Core 0.29.0/schema 0016 match accepted
+runtime `97a7a1b`. [Exact-source PR validation](https://github.com/Stell0/ns8-czero/actions/runs/39166087566)
+and [main validation/publication](https://github.com/Stell0/ns8-czero/actions/runs/39201930016)
+are completed/successful. Gate baseline `fca959d` passes 236 policy cases,
+targeted policy/review, full Go/distribution and race tests on Linux.
+
+Implementation branch `feat/persistent-memory-policy-review` confines memory to
+an optional canonical skill, discovery documentation and packaging checks.
+No C0 code enters Gate. Memory and policy review do not invoke each other.
+Automatic review is an agent instruction before the final report, not a daemon
+hook mistaking a connection disconnect for the end of an investigation.
+
+Policy analysis deduplicates command IDs, requires confirmed execution results
+and distinct nonempty operator-named Gate target contexts, and never counts connection sessions
+as independent cases. It reports rejected/pending groups, removes broad fallback
+argument/path grammars and bounds proposed log counts to 1–1000. Proposals
+rederive safe tests, preserve original classifications, compare bundled and
+adversarial corpora through the full engine, run mandatory upstream checks and
+reuse equivalent open PRs. Existing default-policy allowances remain unchanged;
+historical unbounded default log allowances need a separately reviewed security
+correction, not an undocumented change during proposal generation.
+
+Acceptance remains pending for cross-session memory through current authorized
+harness tools, generated-proposal fixtures, packaging, full suites and
+implementation CI. The session's cached C0 connector exposes 63 older operations;
+server-side protected-space/ingestion operations cannot be fabricated in that
+catalog. Do not claim server/SDK-only evidence proves a refreshed-harness skill pass.
+
 ## Design constraints
 
 The following constraints apply to every version:
@@ -434,7 +465,7 @@ Bad proposal:
 Better proposal:
 
 ```text
-^journalctl -u [a-zA-Z0-9_.@-]+ -n [0-9]+$
+^journalctl -u [a-zA-Z0-9][a-zA-Z0-9_.@-]{0,127} -n (?:[1-9][0-9]{0,2}|1000)$
 ```
 
 The skill should prefer multiple narrow rules over one broad expression.
@@ -489,7 +520,7 @@ Observed during support sessions:
 - journalctl -u agent -n 100
 
 Proposed rule:
-^journalctl -u [a-zA-Z0-9_.@-]+ -n [0-9]+$
+^journalctl -u [a-zA-Z0-9][a-zA-Z0-9_.@-]{0,127} -n (?:[1-9][0-9]{0,2}|1000)$
 
 Still excluded:
 - --follow
@@ -574,3 +605,34 @@ Recommended sequence:
 ```
 
 At every step, preserve the core security boundary: the agent gets a controlled command surface, not a Windmill session and not a general-purpose production shell.
+
+
+## WG implementation verification (19 October 2026)
+
+Local candidate passes 241 policy cases, targeted policy/review/CLI tests, full
+Go/distribution tests and race tests. The bounded-composition fuzz run passes
+23,457 mutations over six seconds with two workers. Both changed skills pass the
+skill validator. Linux distribution fixtures include canonical memory references,
+keep memory undiscoverable by default and exercise enable/disable; Windows fixtures
+exercise equivalent archive/install/discovery behavior in CI.
+
+Disposable local upstream tests clone, create/commit/push a review branch and
+verify the upstream active checkout is unchanged. Hosting creation is a recorded
+test double, not a real disposable GitHub PR. Source-repository fixtures exercise
+all mandatory preflight dispatches and fail each individually; failures and
+proposal-byte mutations prevent commit/push. Repeated open-PR fixtures reuse an
+existing proposal. Original-suite failures and unsupported/broad rules are rejected.
+
+Independent agent validation reads the full memory skill and references, observes
+the old 63-tool C0 catalog and performs one authorized bounded generic text search
+(successful, zero hits). Its outage/read-only/injection/resume scenarios are
+instruction evaluations, not a live two-session persistence test. Its retention
+finding is fixed: local journaling requires an existing verified bounded-expiry
+mechanism as well as private permissions, otherwise journaling is omitted.
+
+The extra cross-platform build/fuzz attempt initially hit /tmp disk quota; only
+this task's verification cache was moved into ignored `bin/verification` for retry.
+Full release-archive verification and implementation CI results remain pending.
+Do not mark final acceptance complete: a refreshed authorized harness catalog and
+a real two-session evidence/procedure round trip are still required, as is the
+requested disposable hosting integration proof. No active policy is changed.
