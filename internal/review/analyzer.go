@@ -102,9 +102,9 @@ func AnalyzeReport(history []storage.HistoryEntry, engine *policy.Engine, minimu
 		// remain one conservative target context; names are never exported.
 		group.targets[strings.ToLower(strings.TrimSpace(entry.TargetName))] = struct{}{}
 		// Keep the evidence bounded; every included example passes the same grammar.
-		if _, exists := group.examples[entry.Command]; !exists && len(group.candidate.Examples) < 5 {
-			group.examples[entry.Command] = struct{}{}
-			group.candidate.Examples = append(group.candidate.Examples, entry.Command)
+		if _, exists := group.examples[sanitizedExample(entry.Command)]; !exists && len(group.candidate.Examples) < 5 {
+			group.examples[sanitizedExample(entry.Command)] = struct{}{}
+			group.candidate.Examples = append(group.candidate.Examples, sanitizedExample(entry.Command))
 		}
 	}
 	for _, group := range groups {
@@ -167,7 +167,7 @@ func generalize(value string) (Candidate, bool) {
 	}
 	candidate.Excluded = []string{"shell composition, quotes, escapes and control characters", "extra arguments, option-like names and paths", "unbounded logs, writes, shells and unsupported wrappers"}
 	// Mutations are checked both as raw regexps and through the complete engine.
-	for _, positive := range append(append([]string{}, candidate.PositiveTests...), value) {
+	for _, positive := range append(append([]string{}, candidate.PositiveTests...), sanitizedExample(value)) {
 		candidate.NegativeTests = append(candidate.NegativeTests, adversarialMutations(positive)...)
 	}
 	return candidate, true
@@ -265,4 +265,21 @@ func exactReadOnly(fields []string) bool {
 		return len(fields) == 2 && fields[1] == "ps"
 	}
 	return false
+}
+
+// Variable identifiers can contain customer or transport data that a secret
+// heuristic cannot recognize. Only proposal evidence is redacted; the original
+// audit payload and approved execution bytes are never modified.
+func sanitizedExample(value string) string {
+	fields := strings.Split(value, " ")
+	if len(fields) == 5 && fields[0] == "journalctl" {
+		fields[2] = "example.service"
+	}
+	if len(fields) == 3 && fields[0] == "systemctl" {
+		fields[2] = "example.service"
+	}
+	if len(fields) == 5 && fields[0] == "podman" && fields[1] == "logs" {
+		fields[4] = "example-container"
+	}
+	return strings.Join(fields, " ")
 }

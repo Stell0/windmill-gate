@@ -27,7 +27,11 @@ func canonicalCandidate(input Candidate) (Candidate, error) {
 		}
 		result = derived
 	}
-	result.Examples = unique(input.Examples)
+	result.Examples = []string{}
+	for _, example := range input.Examples {
+		result.Examples = append(result.Examples, sanitizedExample(example))
+	}
+	result.Examples = unique(result.Examples)
 	result.Approvals = input.Approvals
 	result.Sessions = input.Sessions
 	result.Targets = input.Targets

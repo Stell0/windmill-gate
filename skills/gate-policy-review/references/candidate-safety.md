@@ -30,6 +30,9 @@ document and positively test this supported inheritance, and negatively test
 nested, malformed and option-bearing wrappers. Do not add broader wrapper support
 or rewrite approved command bytes during review.
 
+Variable unit/container identifiers are replaced with generic examples in proposal
+evidence and generated tests; raw audit/execution bytes stay unchanged. Secret
+heuristics alone cannot recognize every customer or transport identifier.
 Sanitize candidate examples before publication. Never export customer data,
 credentials or backend identifiers. The PR includes successful approval counts,
 independent target context counts (not purported support-case counts), intended

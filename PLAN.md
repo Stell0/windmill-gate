@@ -677,3 +677,20 @@ subprocess regression proving warnings cannot contaminate NUL-framed path data.
 The NUL-framing improvement also remains covered for newline-bearing filenames.
 The composition fuzz assertion now independently parses canonical decimal counts
 and passes another 13,275 mutations rather than rederiving its own grammar.
+
+
+Final privacy review also removes variable unit/container identifiers from exported
+candidate examples and generated tests, replacing them with generic identifiers
+before publication. This avoids relying on secret-name heuristics for customer or
+transport data. A regression checks all supported variable families, report/test/PR
+serialization and preservation of the original audit command bytes. Counts and
+rule derivation still come from the actual successful approvals.
+
+
+Portability source `d365fc1` passes all five jobs in actual [CI 39227438495](https://github.com/Stell0/windmill-gate/actions/runs/39227438495):
+native Linux/macOS/Windows policy and Go tests, both Windows PowerShell installer
+variants, Linux race checks and native Linux/macOS distribution fixtures. The
+privacy follow-up also passes all four mandatory local suites. Latest follow-up
+CI is tracked by [implementation PR 3](https://github.com/Stell0/windmill-gate/pull/3).
+Final acceptance remains open specifically for the refreshed-harness C0 round trip;
+no merge/deployment is authorized by these test results.

@@ -371,7 +371,7 @@ func PullRequestBody(candidates []Candidate) string {
 		fmt.Fprintf(&body, "### `%s`\n\n", candidate.Pattern)
 		fmt.Fprintf(&body, "- Evidence: %d successful manual approvals across %d Gate target contexts; %d connection sessions (not independent support cases).\n", candidate.Approvals, candidate.Targets, candidate.Sessions)
 		fmt.Fprintf(&body, "- Allowed input space: %s.\n", candidate.AllowedSpace)
-		body.WriteString("- Redacted observed examples:\n")
+		body.WriteString("- Sanitized observed examples (variable unit/container identifiers replaced; original audit/execution bytes unchanged):\n")
 		for _, example := range candidate.Examples {
 			fmt.Fprintf(&body, "  - `%s`\n", redactExample(example))
 		}

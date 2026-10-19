@@ -157,3 +157,29 @@ func TestReportDoesNotSerializeRejectedSecretsOrTargetNames(t *testing.T) {
 		t.Fatal(report)
 	}
 }
+
+func TestVariableIdentifiersNeverEnterProposalEvidence(t *testing.T) {
+	engine, _ := policy.New(policy.Config{})
+	for _, value := range []string{"journalctl -u customer42.service -n 100", "podman logs --tail 100 customer42", "systemctl status customer42.service"} {
+		history := []storage.HistoryEntry{approved("as1", "gt1", value), approved("as2", "gt2", value), approved("as3", "gt1", value)}
+		report := AnalyzeReport(history, engine, 3)
+		if len(report.Candidates) != 1 {
+			t.Fatal(report)
+		}
+		data, err := json.Marshal(report)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(data), "customer42") {
+			t.Fatalf("variable identifier leaked in examples/tests: %s", data)
+		}
+		if history[0].Command != value {
+			t.Fatal("approved/audited bytes changed")
+		}
+		c := report.Candidates[0]
+		proposed, tests, err := ApplyCandidates([]byte("allow: []\n"), []byte("allow: []\n"), []Candidate{c})
+		if err != nil || strings.Contains(string(proposed)+string(tests)+PullRequestBody([]Candidate{c}), "customer42") {
+			t.Fatalf("proposal leak or failure: %v", err)
+		}
+	}
+}
