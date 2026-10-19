@@ -45,6 +45,8 @@ function Invoke-WebRequest {
 
 try {
     New-Item -ItemType Directory -Path $downloads, $bundle, $skillRoot | Out-Null
+    Copy-Item -Recurse -LiteralPath (Join-Path $gateRoot "skills") -Destination $bundle
+    Copy-Item -Recurse -LiteralPath (Join-Path $gateRoot ".agents") -Destination $bundle
     Set-Content -LiteralPath (Join-Path $bundle "gate.exe") -Value "test gate binary" -Encoding ASCII
     Set-Content -LiteralPath (Join-Path $bundle "gate-sh.exe") -Value "test gate client" -Encoding ASCII
     Copy-Item -LiteralPath (Join-Path $gateRoot "update-nethserver-admin.ps1") -Destination $bundle
@@ -67,14 +69,24 @@ try {
     foreach ($expected in @(
         "gate.exe",
         "gate-sh.exe",
-        ".agents\skills\nethserver-admin\SKILL.md"
+        ".agents\skills\nethserver-admin\SKILL.md",
+        "skills\gate-c0-memory\references\c0-operations.md",
+        ".agents\skills\gate-policy-review\SKILL.md",
+        ".agents\skills\gate-remote-shell\SKILL.md",
+        ".agents\skills\gate-port-forward\SKILL.md"
     )) {
         if (-not (Test-Path -LiteralPath (Join-Path $installDirectory $expected) -PathType Leaf)) {
             throw "Windows distribution test: missing installed file $expected"
         }
     }
 
-    Write-Host "PASS: Windows distribution installer"
+    $discovery = Join-Path $installDirectory ".agents\skills\gate-c0-memory"
+    if (Test-Path -LiteralPath $discovery) { throw "Memory unexpectedly discoverable" }
+    Copy-Item -Recurse -LiteralPath (Join-Path $installDirectory "skills\gate-c0-memory") -Destination $discovery
+    if (-not (Test-Path -LiteralPath (Join-Path $discovery "references\c0-operations.md"))) { throw "Missing enabled references" }
+    Remove-Item -Recurse -LiteralPath $discovery
+    if (Test-Path -LiteralPath $discovery) { throw "Memory still discoverable" }
+    Write-Host "PASS: Windows distribution installer and optional memory discovery"
 } finally {
     Restore-EnvironmentVariable -Name "GATE_INSTALL_DIR" -Value $previousInstallDirectory
     Restore-EnvironmentVariable -Name "GATE_RELEASE_BASE_URL" -Value $previousReleaseBase

@@ -33,6 +33,8 @@ for gate_target in linux_amd64 linux_arm64 darwin_amd64 darwin_arm64; do
 			-o "$gate_bundle/gate" ./cmd/gate
 		cp AGENTS.md PLAN.md README.md install.sh update-nethserver-admin "$gate_bundle/"
 		cp -R .agents config skills "$gate_bundle/"
+        # Never distribute an installation-local memory discovery opt-in.
+        rm -rf "$gate_bundle/.agents/skills/gate-c0-memory"
 	)
 	chmod 0755 "$gate_bundle/gate" "$gate_bundle/update-nethserver-admin"
 	ln -s gate "$gate_bundle/gate-sh"
@@ -57,6 +59,8 @@ for gate_target in windows_amd64 windows_arm64; do
 		cp "$gate_bundle/gate.exe" "$gate_bundle/gate-sh.exe"
 		cp AGENTS.md PLAN.md README.md install.ps1 update-nethserver-admin.ps1 "$gate_bundle/"
 		cp -R .agents config skills "$gate_bundle/"
+        # Never distribute an installation-local memory discovery opt-in.
+        rm -rf "$gate_bundle/.agents/skills/gate-c0-memory"
 		cd "$gate_tmp_dir/$gate_target"
 		zip -qr "$gate_archive" windmill-gate
 	)
