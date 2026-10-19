@@ -249,6 +249,16 @@ allow:
     expect: ALLOW
 
 ask:
+  - command: "runagent -m module1 runagent -m nested journalctl -u redis -n 100"
+    expect: ASK
+  - command: "podman logs --tail 1001 redis"
+    expect: ASK
+  - command: "journalctl -u redis -n 100 --unexpected"
+    expect: ASK
+  - command: "journalctl -u redis -n 99999999999999999999999999999"
+    expect: ASK
+  - command: "journalctl -u redis -n 01"
+    expect: ASK
   - command: "journalctl -u redis --follow"
     expect: ASK
   - command: "journalctl -u redis -n 100 --output=json"

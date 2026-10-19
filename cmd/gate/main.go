@@ -586,13 +586,15 @@ func runPolicyReview(args []string, stdout, stderr io.Writer) int {
 	flags.SetOutput(stderr)
 	var databasePath, policyPath, reviewConfigPath, label string
 	var minimum int
-	var asJSON bool
+	var asJSON, asReport, automatic bool
 	flags.StringVar(&databasePath, "database", config.DatabasePath(), "Gate audit database")
 	flags.StringVar(&policyPath, "policy", config.PolicyPath(), "currently active Gate policy")
 	flags.StringVar(&reviewConfigPath, "config", config.PolicyReviewPath(), "policy-review repository config")
-	flags.StringVar(&label, "label", "history", "non-sensitive branch label")
+	flags.StringVar(&label, "label", "history", "compatibility option; proposal branch identity is derived from rules")
 	flags.IntVar(&minimum, "minimum-approvals", 0, "override evidence threshold (minimum 2)")
 	flags.BoolVar(&asJSON, "json", false, "emit candidates as JSON")
+	flags.BoolVar(&asReport, "report", false, "emit a JSON review report, including pending evidence and rejection counts")
+	flags.BoolVar(&automatic, "automatic", false, "require configured automated_pr publishing authorization")
 	if err := flags.Parse(args[1:]); err != nil || flags.NArg() != 0 {
 		return 2
 	}
@@ -602,6 +604,10 @@ func runPolicyReview(args []string, stdout, stderr io.Writer) int {
 		reviewConfig, err = review.LoadConfig(reviewConfigPath)
 		if err != nil {
 			fmt.Fprintf(stderr, "gate: %v\n", err)
+			return 1
+		}
+		if automatic && !reviewConfig.AutomatedPR {
+			fmt.Fprintln(stderr, "gate: automated PR publishing is not configured; run analysis only")
 			return 1
 		}
 		if minimum == 0 {
@@ -631,7 +637,18 @@ func runPolicyReview(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "gate: %v\n", err)
 		return 1
 	}
-	candidates := review.Analyze(history, engine, minimum)
+	report := review.AnalyzeReport(history, engine, minimum)
+	candidates := report.Candidates
+	if asReport {
+		if mode != "analyze" {
+			fmt.Fprintln(stderr, "gate: --report requires analyze")
+			return 2
+		}
+		if err := json.NewEncoder(stdout).Encode(report); err != nil {
+			return 1
+		}
+		return 0
+	}
 	if mode == "analyze" {
 		if asJSON {
 			encoder := json.NewEncoder(stdout)
@@ -662,7 +679,7 @@ func runPolicyReview(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "gate: policy proposal: %v\n", err)
 		return 1
 	}
-	fmt.Fprintf(stdout, "Created branch: %s\nPull request: %s\nNo policy was merged or deployed; human review is required.\n", proposal.Branch, proposal.PullURL)
+	fmt.Fprintf(stdout, "Proposal branch: %s\nPull request: %s\nNo policy was merged or deployed; human review is required.\n", proposal.Branch, proposal.PullURL)
 	return 0
 }
 

@@ -7,3 +7,8 @@ import _ "embed"
 //
 //go:embed default.yaml
 var DefaultYAML []byte
+
+// RegressionYAML is the complete baseline used when reviewing policy-only repositories.
+//
+//go:embed tests/default.yaml
+var RegressionYAML []byte

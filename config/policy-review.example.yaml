@@ -4,3 +4,6 @@ policy_path: policy/default.yaml
 tests_path: policy/tests/default.yaml
 minimum_approvals: 3
 
+# Permit the end-of-investigation skill to publish eligible tested proposals.
+# False/absent keeps automatic sessions analysis-only; explicit propose still works.
+automated_pr: false

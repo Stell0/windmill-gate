@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -93,5 +95,25 @@ func TestExecRequiresOneExactArgument(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if exitCode := run([]string{"exec", "uptime", "extra"}, strings.NewReader(""), &stdout, &stderr); exitCode != 2 {
 		t.Fatalf("exit=%d, want usage error", exitCode)
+	}
+}
+
+func TestPolicyReviewReportWithoutMemoryOrPublishing(t *testing.T) {
+	var out, errs bytes.Buffer
+	code := run([]string{"policy-review", "analyze", "--database", filepath.Join(t.TempDir(), "audit.db"), "--policy", filepath.Join("..", "..", "policy", "default.yaml"), "--report"}, strings.NewReader(""), &out, &errs)
+	var report map[string]any
+	if code != 0 || json.Unmarshal(out.Bytes(), &report) != nil || report["commands_considered"] != float64(0) || report["tests"] != "not run; analysis does not modify policy" {
+		t.Fatalf("code=%d report=%s error=%s", code, &out, &errs)
+	}
+}
+func TestAutomaticProposalRequiresConfiguredAuthority(t *testing.T) {
+	config := filepath.Join(t.TempDir(), "review.yaml")
+	if err := os.WriteFile(config, []byte("policy_repository: /nonexistent/must-not-clone\nautomated_pr: false\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out, errs bytes.Buffer
+	code := run([]string{"policy-review", "propose", "--automatic", "--config", config}, strings.NewReader(""), &out, &errs)
+	if code != 1 || !strings.Contains(errs.String(), "not configured") {
+		t.Fatalf("code=%d output=%s error=%s", code, &out, &errs)
 	}
 }

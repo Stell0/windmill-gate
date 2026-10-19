@@ -4,7 +4,6 @@ package review
 import (
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"unicode"
 
@@ -23,6 +22,7 @@ type Candidate struct {
 	AllowedSpace  string   `json:"allowed_space"`
 	Excluded      []string `json:"excluded"`
 	NegativeTests []string `json:"negative_tests"`
+	PositiveTests []string `json:"positive_tests"`
 }
 
 type candidateGroup struct {
@@ -32,111 +32,154 @@ type candidateGroup struct {
 	examples  map[string]struct{}
 }
 
+// Report contains only sanitized candidates and aggregate rejection reasons. Audit
+// connection IDs describe transport activity, never independent investigations.
+type Report struct {
+	Considered      int            `json:"commands_considered"`
+	ManualApprovals int            `json:"manual_approvals"`
+	Candidates      []Candidate    `json:"eligible_candidates"`
+	Pending         []Candidate    `json:"pending_evidence"`
+	Rejected        map[string]int `json:"rejected_reasons"`
+	Tests           string         `json:"tests"`
+	Usefulness      string         `json:"diagnostic_usefulness"`
+}
+
 func Analyze(history []storage.HistoryEntry, engine *policy.Engine, minimumApprovals int) []Candidate {
+	return AnalyzeReport(history, engine, minimumApprovals).Candidates
+}
+
+func AnalyzeReport(history []storage.HistoryEntry, engine *policy.Engine, minimumApprovals int) Report {
+	report := Report{Considered: len(history), Candidates: []Candidate{}, Pending: []Candidate{}, Rejected: map[string]int{},
+		Tests: "not run; analysis does not modify policy", Usefulness: "exit success is not proof of diagnostic usefulness; review investigation observations before publishing"}
 	if engine == nil {
-		return nil
+		report.Rejected["policy unavailable"] = len(history)
+		return report
 	}
 	if minimumApprovals < 2 {
 		minimumApprovals = 2
 	}
 	groups := make(map[string]*candidateGroup)
+	seen := map[string]bool{}
 	for _, entry := range history {
-		if entry.State != command.Succeeded || entry.PolicyResult != policy.Ask {
+		reason := ""
+		switch {
+		case entry.ID == "" || seen[entry.ID]:
+			reason = "missing or duplicate command identity"
+		case entry.State != command.Succeeded || entry.ExitCode == nil || *entry.ExitCode != 0:
+			reason = "not a confirmed successful execution"
+		case entry.PolicyResult != policy.Ask || (entry.ApprovalAction != string(approval.ApproveOnce) && entry.ApprovalAction != string(approval.AllowTarget)):
+			reason = "not a manual ASK approval"
+		case entry.TargetID == "" || strings.TrimSpace(entry.TargetName) == "":
+			reason = "missing target context"
+		}
+		if entry.ID != "" {
+			seen[entry.ID] = true
+		}
+		if reason != "" {
+			report.Rejected[reason]++
 			continue
 		}
-		if entry.ApprovalAction != string(approval.ApproveOnce) && entry.ApprovalAction != string(approval.AllowTarget) {
-			continue
-		}
+		report.ManualApprovals++
 		if engine.Evaluate(entry.TargetID, entry.Command).Decision != policy.Ask {
+			report.Rejected["already allowed or currently denied"]++
 			continue
 		}
 		candidate, ok := generalize(entry.Command)
 		if !ok {
+			report.Rejected["outside bounded read-only grammar or sensitive"]++
 			continue
 		}
 		group := groups[candidate.Pattern]
 		if group == nil {
-			group = &candidateGroup{
-				candidate: candidate, sessions: make(map[string]struct{}),
-				targets: make(map[string]struct{}), examples: make(map[string]struct{}),
-			}
+			group = &candidateGroup{candidate: candidate, sessions: map[string]struct{}{}, targets: map[string]struct{}{}, examples: map[string]struct{}{}}
 			groups[candidate.Pattern] = group
 		}
 		group.candidate.Approvals++
-		group.sessions[entry.AgentSessionID] = struct{}{}
-		group.targets[entry.TargetID] = struct{}{}
-		if len(group.candidate.Examples) < 5 {
-			if _, exists := group.examples[entry.Command]; !exists {
-				group.examples[entry.Command] = struct{}{}
-				group.candidate.Examples = append(group.candidate.Examples, entry.Command)
-			}
+		if entry.AgentSessionID != "" {
+			group.sessions[entry.AgentSessionID] = struct{}{}
+		}
+		// Reattachments get new opaque IDs. Repeated operator display names
+		// remain one conservative target context; names are never exported.
+		group.targets[strings.ToLower(strings.TrimSpace(entry.TargetName))] = struct{}{}
+		// Keep the evidence bounded; every included example passes the same grammar.
+		if _, exists := group.examples[entry.Command]; !exists && len(group.candidate.Examples) < 5 {
+			group.examples[entry.Command] = struct{}{}
+			group.candidate.Examples = append(group.candidate.Examples, entry.Command)
 		}
 	}
-
-	result := make([]Candidate, 0, len(groups))
 	for _, group := range groups {
-		group.candidate.Sessions = len(group.sessions)
+		group.candidate.Sessions = len(group.sessions) // informational only
 		group.candidate.Targets = len(group.targets)
-		if group.candidate.Approvals < minimumApprovals {
-			continue
-		}
-		if group.candidate.Sessions < 2 && group.candidate.Targets < 2 {
-			continue
-		}
 		sort.Strings(group.candidate.Examples)
-		result = append(result, group.candidate)
+		if group.candidate.Approvals < minimumApprovals || group.candidate.Targets < 2 {
+			report.Pending = append(report.Pending, group.candidate)
+		} else {
+			report.Candidates = append(report.Candidates, group.candidate)
+		}
 	}
-	sort.Slice(result, func(i, j int) bool { return result[i].Pattern < result[j].Pattern })
-	return result
+	sort.Slice(report.Candidates, func(i, j int) bool { return report.Candidates[i].Pattern < report.Candidates[j].Pattern })
+	sort.Slice(report.Pending, func(i, j int) bool { return report.Pending[i].Pattern < report.Pending[j].Pattern })
+	return report
 }
+
+const unitGrammar = `[a-zA-Z0-9][a-zA-Z0-9_.@-]{0,127}`
+const nameGrammar = `[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}`
+const countGrammar = `(?:[1-9][0-9]{0,2}|1000)`
+
+var unitName = regexp.MustCompile(`^` + unitGrammar + `$`)
+var containerName = regexp.MustCompile(`^` + nameGrammar + `$`)
+var boundedCount = regexp.MustCompile(`^` + countGrammar + `$`)
 
 func generalize(value string) (Candidate, bool) {
 	if !safeShape(value) {
 		return Candidate{}, false
 	}
 	fields := strings.Fields(value)
-	if len(fields) == 0 || strings.Join(fields, " ") != value {
+	if len(fields) == 0 || strings.Join(fields, " ") != value || hasSecret(fields) || hasSideEffects(fields) {
 		return Candidate{}, false
 	}
-	if hasSecret(fields) || hasSideEffects(fields) {
-		return Candidate{}, false
-	}
-
-	unit := regexp.MustCompile(`^[a-zA-Z0-9_.@-]+$`)
-	name := regexp.MustCompile(`^[a-zA-Z0-9_.-]+$`)
+	var candidate Candidate
 	switch {
-	case len(fields) == 5 && fields[0] == "journalctl" && fields[1] == "-u" && unit.MatchString(fields[2]) && fields[3] == "-n" && isPositiveInteger(fields[4]):
-		return Candidate{
-			Pattern:       `^journalctl -u [a-zA-Z0-9_.@-]+ -n [0-9]+$`,
-			AllowedSpace:  "bounded journal reads for one syntactically safe systemd unit",
-			Excluded:      []string{"--follow", "additional arguments", "pipelines and redirections"},
-			NegativeTests: []string{"journalctl -u redis --follow", "journalctl -u redis -n 100 --output=json"},
-		}, true
-	case len(fields) == 3 && fields[0] == "systemctl" && fields[1] == "status" && unit.MatchString(fields[2]):
-		return Candidate{
-			Pattern:       `^systemctl status [a-zA-Z0-9_.@-]+$`,
-			AllowedSpace:  "read-only status for one syntactically safe systemd unit",
-			Excluded:      []string{"restart, stop, or other state changes", "additional arguments"},
-			NegativeTests: []string{"systemctl status redis --no-pager", "systemctl restart redis"},
-		}, true
-	case len(fields) == 5 && fields[0] == "podman" && fields[1] == "logs" && fields[2] == "--tail" && isPositiveInteger(fields[3]) && name.MatchString(fields[4]):
-		return Candidate{
-			Pattern:       `^podman logs --tail [0-9]+ [a-zA-Z0-9_.-]+$`,
-			AllowedSpace:  "bounded logs for one syntactically safe container name",
-			Excluded:      []string{"--follow", "exec", "additional arguments"},
-			NegativeTests: []string{"podman logs --follow redis", "podman exec redis sh"},
-		}, true
+	case len(fields) == 5 && fields[0] == "journalctl" && fields[1] == "-u" && unitName.MatchString(fields[2]) && fields[3] == "-n" && boundedCount.MatchString(fields[4]):
+		candidate = Candidate{Pattern: `^journalctl -u ` + unitGrammar + ` -n ` + countGrammar + `$`,
+			AllowedSpace:  "one alphanumeric-led unit (at most 128 characters), 1 through 1000 journal lines",
+			PositiveTests: []string{"journalctl -u redis -n 1", "journalctl -u redis -n 100", "journalctl -u redis -n 200", "journalctl -u redis -n 1000"},
+			NegativeTests: []string{"journalctl -u redis --follow", "journalctl -u redis -n 100 --output=json", "journalctl -u --all -n 100", "journalctl -u ../redis -n 100", "journalctl -u  -n 100", "journalctl -u " + strings.Repeat("a", 129) + " -n 100"}}
+		for _, n := range []string{"0", "00", "01", "1001", "99999999999999999999999999999", "-1", "+1", "all", ""} {
+			candidate.NegativeTests = append(candidate.NegativeTests, "journalctl -u redis -n "+n)
+		}
+	case len(fields) == 3 && fields[0] == "systemctl" && fields[1] == "status" && unitName.MatchString(fields[2]):
+		candidate = Candidate{Pattern: `^systemctl status ` + unitGrammar + `$`, AllowedSpace: "read-only status of one alphanumeric-led unit (at most 128 characters)",
+			PositiveTests: []string{"systemctl status redis", "systemctl status redis@1.service"},
+			NegativeTests: []string{"systemctl status --all", "systemctl restart redis", "systemctl status redis --unexpected", "systemctl status ../redis", "systemctl status ", "systemctl status " + strings.Repeat("a", 129)}}
+	case len(fields) == 5 && fields[0] == "podman" && fields[1] == "logs" && fields[2] == "--tail" && boundedCount.MatchString(fields[3]) && containerName.MatchString(fields[4]):
+		candidate = Candidate{Pattern: `^podman logs --tail ` + countGrammar + ` ` + nameGrammar + `$`, AllowedSpace: "1 through 1000 log lines from one alphanumeric-led container (at most 128 characters)",
+			PositiveTests: []string{"podman logs --tail 1 redis", "podman logs --tail 100 redis", "podman logs --tail 1000 redis"},
+			NegativeTests: []string{"podman logs --follow redis", "podman logs redis", "podman exec redis sh", "podman logs --tail 100 --latest", "podman logs --tail 100 ../redis", "podman logs --tail 100 ", "podman logs --tail 100 " + strings.Repeat("a", 129)}}
+		for _, n := range []string{"0", "00", "01", "1001", "99999999999999999999999999999", "-1", "+1", "all", ""} {
+			candidate.NegativeTests = append(candidate.NegativeTests, "podman logs --tail "+n+" redis")
+		}
+	default:
+		if !exactReadOnly(fields) {
+			return Candidate{}, false
+		}
+		candidate = Candidate{Pattern: "^" + regexp.QuoteMeta(value) + "$", AllowedSpace: "only the exact repeatedly approved diagnostic command", PositiveTests: []string{value}}
 	}
+	candidate.Excluded = []string{"shell composition, quotes, escapes and control characters", "extra arguments, option-like names and paths", "unbounded logs, writes, shells and unsupported wrappers"}
+	// Mutations are checked both as raw regexps and through the complete engine.
+	for _, positive := range append(append([]string{}, candidate.PositiveTests...), value) {
+		candidate.NegativeTests = append(candidate.NegativeTests, adversarialMutations(positive)...)
+	}
+	return candidate, true
+}
 
-	if exactReadOnly(fields) {
-		return Candidate{
-			Pattern:       "^" + regexp.QuoteMeta(value) + "$",
-			AllowedSpace:  "only the exact repeatedly approved read-only command",
-			Excluded:      []string{"all additional arguments", "shell composition", "different paths or values"},
-			NegativeTests: []string{value + " --unexpected"},
-		}, true
+func adversarialMutations(value string) []string {
+	result := []string{"", "x" + value, value + "x --unexpected", "prefix " + value, value + " --unexpected", " " + value, value + " ", "sudo " + value,
+		"runagent -m ../module " + value, "runagent -m module runagent -m nested " + value, "runagent -m module podman exec --privileged redis " + value}
+	for _, suffix := range []string{"; reboot", " && reboot", " || reboot", " | sh", " > /tmp/output", " >> /tmp/output", " < /tmp/input", " $(reboot)", " `reboot`", `\`, "\n", "\r", "\t", "\x00", "\x1b", " # comment", " 'unterminated", ` "quoted"`, ` \escaped`} {
+		result = append(result, value+suffix)
 	}
-	return Candidate{}, false
+	return result
 }
 
 func safeShape(value string) bool {
@@ -215,14 +258,6 @@ func exactReadOnly(fields []string) bool {
 		return len(fields) == 1 || (len(fields) == 2 && fields[1] == "-h")
 	case "free":
 		return len(fields) == 1 || (len(fields) == 2 && (fields[1] == "-h" || fields[1] == "-m"))
-	case "ps", "ss", "stat", "ls", "du":
-		return !containsRootPath(fields[1:])
-	case "grep":
-		if len(fields) < 3 {
-			return false
-		}
-		path := fields[len(fields)-1]
-		return strings.HasPrefix(path, "/var/log/") && !strings.Contains(path, "..")
 	case "ip":
 		return (len(fields) == 2 || (len(fields) == 3 && (fields[2] == "show" || fields[2] == "list"))) &&
 			(fields[1] == "addr" || fields[1] == "route" || fields[1] == "link")
@@ -230,18 +265,4 @@ func exactReadOnly(fields []string) bool {
 		return len(fields) == 2 && fields[1] == "ps"
 	}
 	return false
-}
-
-func containsRootPath(fields []string) bool {
-	for _, field := range fields {
-		if field == "/" || field == "." || field == ".." {
-			return true
-		}
-	}
-	return false
-}
-
-func isPositiveInteger(value string) bool {
-	number, err := strconv.ParseUint(value, 10, 31)
-	return err == nil && number > 0
 }

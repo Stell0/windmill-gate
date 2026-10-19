@@ -1,6 +1,6 @@
 ---
 name: gate-policy-review
-description: Review completed Gate audit history and propose narrow persistent allow rules with tests in a human-reviewed pull request. Use at the end of support sessions when repeated manual approvals may justify policy improvement; never merge, deploy, or edit the active policy.
+description: Review command-policy evidence before every normal support investigation ends, report eligible and rejected improvements, and propose fully tested rules through configured human-reviewed PRs. Never merge, deploy or edit active policy.
 ---
 
 # Gate Policy Review

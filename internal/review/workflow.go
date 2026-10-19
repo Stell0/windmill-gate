@@ -3,6 +3,8 @@ package review
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -11,7 +13,6 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/stell0/windmill-gate/internal/policy"
 	"gopkg.in/yaml.v3"
@@ -23,6 +24,7 @@ type Config struct {
 	PolicyPath       string `yaml:"policy_path"`
 	TestsPath        string `yaml:"tests_path"`
 	MinimumApprovals int    `yaml:"minimum_approvals"`
+	AutomatedPR      bool   `yaml:"automated_pr"`
 }
 
 func LoadConfig(path string) (Config, error) {
@@ -88,29 +90,31 @@ type ioDiscard struct{}
 func (ioDiscard) Write(data []byte) (int, error) { return len(data), nil }
 
 type Proposal struct {
-	Branch  string `json:"branch"`
-	PullURL string `json:"pull_request_url"`
+	Branch   string `json:"branch"`
+	PullURL  string `json:"pull_request_url"`
+	Existing bool   `json:"existing"`
 }
 
 type Workflow struct {
 	Runner Runner
-	Now    func() time.Time
 }
 
-func (w Workflow) Propose(ctx context.Context, config Config, candidates []Candidate, label string) (Proposal, error) {
+func (w Workflow) Propose(ctx context.Context, config Config, candidates []Candidate, _ string) (Proposal, error) {
 	if len(candidates) == 0 {
 		return Proposal{}, errors.New("no policy candidates met the evidence threshold")
 	}
-	for _, candidate := range candidates {
+	for i, candidate := range candidates {
+		canonical, err := canonicalCandidate(candidate)
+		if err != nil {
+			return Proposal{}, err
+		}
+		candidates[i] = canonical
 		if err := validateEvidenceCandidate(candidate, config.MinimumApprovals); err != nil {
 			return Proposal{}, err
 		}
 	}
 	if w.Runner == nil {
 		w.Runner = ExecRunner{}
-	}
-	if w.Now == nil {
-		w.Now = time.Now
 	}
 	root, err := os.MkdirTemp("", "gate-policy-review-")
 	if err != nil {
@@ -121,9 +125,20 @@ func (w Workflow) Propose(ctx context.Context, config Config, candidates []Candi
 	if _, err := w.Runner.Run(ctx, "", "git", "clone", "--branch", config.BaseBranch, "--single-branch", "--", config.PolicyRepository, checkout); err != nil {
 		return Proposal{}, err
 	}
-	branch := "gate/policy-suggestions/" + w.Now().UTC().Format("20060102-150405")
-	if suffix := safeLabel(label); suffix != "" {
-		branch += "-" + suffix
+	// Content-derived names prevent duplicate proposals across investigations.
+	identity := []string{config.PolicyPath, config.TestsPath}
+	for _, candidate := range candidates {
+		identity = append(identity, candidate.Pattern)
+	}
+	sort.Strings(identity)
+	digest := sha256.Sum256([]byte(strings.Join(identity, "\x00")))
+	branch := "gate/policy-suggestions/" + hex.EncodeToString(digest[:8])
+	existing, err := w.Runner.Run(ctx, checkout, "gh", "pr", "list", "--state", "open", "--head", branch, "--json", "url", "--jq", ".[0].url // empty")
+	if err != nil {
+		return Proposal{}, err
+	}
+	if strings.TrimSpace(existing) != "" {
+		return Proposal{Branch: branch, PullURL: existing, Existing: true}, nil
 	}
 	if _, err := w.Runner.Run(ctx, checkout, "git", "checkout", "-b", branch); err != nil {
 		return Proposal{}, err
@@ -154,6 +169,40 @@ func (w Workflow) Propose(ctx context.Context, config Config, candidates []Candi
 	if err := os.WriteFile(testsFile, updatedTests, 0o644); err != nil {
 		return Proposal{}, fmt.Errorf("write policy tests: %w", err)
 	}
+	// Policy-only repositories are checked in-process above using the complete
+	// bundled regression corpus and adversarial differential cases. A Gate
+	// source repository must also pass all four mandatory checks on its branch.
+	if _, err := os.Stat(filepath.Join(checkout, "go.mod")); err == nil {
+		for _, check := range [][]string{{"make", "policy-test"}, {"go", "test", "./internal/policy", "./internal/review"}, {"make", "test"}, {"make", "test-race"}} {
+			if _, err := w.Runner.Run(ctx, checkout, check[0], check[1:]...); err != nil {
+				return Proposal{}, fmt.Errorf("upstream preflight: %w", err)
+			}
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return Proposal{}, err
+	}
+	// Checks must not mutate the exact policy/test bytes already validated.
+	finalPolicy, err := os.ReadFile(policyFile)
+	if err != nil {
+		return Proposal{}, err
+	}
+	finalTests, err := os.ReadFile(testsFile)
+	if err != nil {
+		return Proposal{}, err
+	}
+	if !bytes.Equal(finalPolicy, updatedPolicy) || !bytes.Equal(finalTests, updatedTests) {
+		return Proposal{}, errors.New("upstream preflight changed validated proposal bytes")
+	}
+	// Only these two files may differ. Never commit generated artifacts or secrets.
+	changed, err := w.Runner.Run(ctx, checkout, "git", "diff", "--name-only")
+	if err != nil {
+		return Proposal{}, err
+	}
+	for _, path := range strings.Split(strings.TrimSpace(changed), "\n") {
+		if path != "" && path != config.PolicyPath && path != config.TestsPath {
+			return Proposal{}, errors.New("upstream preflight modified an unexpected file")
+		}
+	}
 	if _, err := w.Runner.Run(ctx, checkout, "git", "add", "--", config.PolicyPath, config.TestsPath); err != nil {
 		return Proposal{}, err
 	}
@@ -165,7 +214,11 @@ func (w Workflow) Propose(ctx context.Context, config Config, candidates []Candi
 	}
 	body := PullRequestBody(candidates)
 	title := "policy: allow repeated read-only diagnostics"
-	url, err := w.Runner.Run(ctx, checkout, "gh", "pr", "create", "--base", config.BaseBranch, "--head", branch, "--title", title, "--body", body)
+	bodyPath := filepath.Join(root, "pull-request.md")
+	if err := os.WriteFile(bodyPath, []byte(body), 0o600); err != nil {
+		return Proposal{}, err
+	}
+	url, err := w.Runner.Run(ctx, checkout, "gh", "pr", "create", "--base", config.BaseBranch, "--head", branch, "--title", title, "--body-file", bodyPath)
 	if err != nil {
 		return Proposal{}, err
 	}
@@ -176,7 +229,10 @@ func (w Workflow) Propose(ctx context.Context, config Config, candidates []Candi
 }
 
 func validateEvidenceCandidate(candidate Candidate, minimumApprovals int) error {
-	if candidate.Approvals < minimumApprovals || (candidate.Sessions < 2 && candidate.Targets < 2) {
+	if minimumApprovals < 2 {
+		minimumApprovals = 2
+	}
+	if candidate.Approvals < minimumApprovals || candidate.Targets < 2 {
 		return fmt.Errorf("candidate %q does not meet the configured evidence threshold", candidate.Pattern)
 	}
 	if len(candidate.Examples) == 0 {
@@ -192,6 +248,20 @@ func validateEvidenceCandidate(candidate Candidate, minimumApprovals int) error 
 }
 
 func ApplyCandidates(policyData, testsData []byte, candidates []Candidate) ([]byte, []byte, error) {
+	if len(candidates) == 0 {
+		return nil, nil, errors.New("no candidates")
+	}
+	for i, input := range candidates {
+		canonical, err := canonicalCandidate(input)
+		if err != nil {
+			return nil, nil, err
+		}
+		candidates[i] = canonical
+	}
+	before, err := policy.Parse(policyData)
+	if err != nil {
+		return nil, nil, err
+	}
 	var document yaml.Node
 	if err := yaml.Unmarshal(policyData, &document); err != nil {
 		return nil, nil, fmt.Errorf("parse upstream policy: %w", err)
@@ -200,6 +270,7 @@ func ApplyCandidates(policyData, testsData []byte, candidates []Candidate) ([]by
 	if err != nil {
 		return nil, nil, err
 	}
+	added := false
 	existing := make(map[string]bool)
 	for _, node := range allow.Content {
 		existing[node.Value] = true
@@ -211,7 +282,11 @@ func ApplyCandidates(policyData, testsData []byte, candidates []Candidate) ([]by
 		if !existing[candidate.Pattern] {
 			allow.Content = append(allow.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: candidate.Pattern, Style: yaml.SingleQuotedStyle})
 			existing[candidate.Pattern] = true
+			added = true
 		}
+	}
+	if !added {
+		return nil, nil, errors.New("candidate rules already exist upstream")
 	}
 	updatedPolicy, err := yaml.Marshal(&document)
 	if err != nil {
@@ -228,6 +303,15 @@ func ApplyCandidates(policyData, testsData []byte, candidates []Candidate) ([]by
 	if err := testDecoder.Decode(&suite); err != nil {
 		return nil, nil, fmt.Errorf("parse upstream policy tests: %w", err)
 	}
+	if _, failures := suite.Run(before); len(failures) > 0 {
+		return nil, nil, errors.New("upstream baseline policy tests fail")
+	}
+	if _, failures := suite.Run(engine); len(failures) > 0 {
+		return nil, nil, errors.New("candidate regresses original upstream suite")
+	}
+	if err := validateDifferential(before, engine, suite, candidates); err != nil {
+		return nil, nil, err
+	}
 	seen := make(map[string]bool)
 	for _, group := range [][]policy.TestCase{suite.Allow, suite.Ask, suite.Deny} {
 		for _, test := range group {
@@ -235,7 +319,7 @@ func ApplyCandidates(policyData, testsData []byte, candidates []Candidate) ([]by
 		}
 	}
 	for _, candidate := range candidates {
-		for _, example := range candidate.Examples {
+		for _, example := range positiveCases(candidate) {
 			if engine.Evaluate("gt_policy_review", example).Decision != policy.Allow {
 				return nil, nil, fmt.Errorf("candidate rule does not allow observed example %q", example)
 			}
@@ -285,7 +369,7 @@ func PullRequestBody(candidates []Candidate) string {
 	body.WriteString("## Rationale\n\nGate observed repeated, successful manual approvals for read-only diagnostics. This proposal adds only the narrow rules below.\n\n")
 	for _, candidate := range candidates {
 		fmt.Fprintf(&body, "### `%s`\n\n", candidate.Pattern)
-		fmt.Fprintf(&body, "- Evidence: %d manual approvals across %d agent sessions and %d Gate targets.\n", candidate.Approvals, candidate.Sessions, candidate.Targets)
+		fmt.Fprintf(&body, "- Evidence: %d successful manual approvals across %d Gate target contexts; %d connection sessions (not independent support cases).\n", candidate.Approvals, candidate.Targets, candidate.Sessions)
 		fmt.Fprintf(&body, "- Allowed input space: %s.\n", candidate.AllowedSpace)
 		body.WriteString("- Redacted observed examples:\n")
 		for _, example := range candidate.Examples {
@@ -295,8 +379,9 @@ func PullRequestBody(candidates []Candidate) string {
 		for _, excluded := range candidate.Excluded {
 			fmt.Fprintf(&body, "  - %s\n", excluded)
 		}
-		fmt.Fprintf(&body, "- Tests: %d positive evidence cases and %d dangerous/boundary variants.\n\n", len(candidate.Examples), len(candidate.NegativeTests))
+		fmt.Fprintf(&body, "- Tests: %d positive cases (observed and representative) and %d dangerous/boundary variants.\n\n", len(positiveCases(candidate)), len(candidate.NegativeTests))
 	}
+	body.WriteString("## Validation\n\nPASS: original upstream suite, complete bundled Gate regression corpus, raw Go regexp positive/negative boundaries and full-engine differential/adversarial checks. Only documented positive cases may change ASK to ALLOW; DENY and existing ALLOW classifications are preserved. Gate source repositories additionally pass make policy-test, targeted Go tests, make test and make test-race before push. Exit success does not establish diagnostic usefulness; investigation context must be reviewed.\n\n")
 	body.WriteString("## Review boundary\n\nA human must review and merge this pull request. Gate has not merged, deployed, or changed any active production policy. No Windmill session identifiers are included.\n")
 	return body.String()
 }
@@ -348,17 +433,6 @@ func cleanRelative(path string) (string, error) {
 		return "", errors.New("path must stay inside the policy repository")
 	}
 	return clean, nil
-}
-
-var unsafeLabel = regexp.MustCompile(`[^a-z0-9-]+`)
-
-func safeLabel(value string) string {
-	value = strings.ToLower(strings.TrimSpace(value))
-	value = strings.Trim(unsafeLabel.ReplaceAllString(value, "-"), "-")
-	if len(value) > 32 {
-		value = strings.TrimRight(value[:32], "-")
-	}
-	return value
 }
 
 var credentialAssignment = regexp.MustCompile(`(?i)(password|passwd|token|secret|authorization|cookie)=\S+`)

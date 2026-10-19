@@ -1,28 +1,58 @@
 ---
 name: gate-policy-review
-description: Review completed Gate audit history and propose narrow persistent allow rules with tests in a human-reviewed pull request. Use at the end of support sessions when repeated manual approvals may justify policy improvement; never merge, deploy, or edit the active policy.
+description: Review command-policy evidence before every normal support investigation ends, report eligible and rejected improvements, and propose fully tested rules through configured human-reviewed PRs. Never merge, deploy or edit active policy.
 ---
 
 # Gate Policy Review
 
-Analyze completed Gate history, not live command input. Use `./gate` from a
-downloaded release directory, `bin/gate` from a source build, or `gate` when it
-is installed on `PATH`. Start with:
+Run this independent workflow before the final support report, even when memory
+is absent or unavailable. Neither use C0 nor invoke a memory skill. C0 pages are
+not evidence of human approval. Best-effort failure must not block the final report.
+
+Use `./gate` in a release, `bin/gate` in a source build, or `gate` on PATH
+(`.\gate.exe` on Windows). Read [candidate safety](references/candidate-safety.md).
+With authorized local audit access, read bounded `gate history --json` and run:
 
 ```bash
-./gate policy-review analyze
+./gate policy-review analyze --report
 ```
 
-Require repeated, successful, manually approved evidence. Reject secrets, backend identifiers, side effects, interactive tools, remote shells, broad paths, and shell composition. Read [candidate safety](references/candidate-safety.md) before accepting or hand-editing any proposal.
+The report lists commands considered, successful manual approvals, sanitized
+eligible candidates, pending evidence, rejection reasons and test status. It never
+contains raw rejected commands. Inspect relevant recent decisions in the available
+audit and investigation observations. Distinguish successful execution from useful
+diagnosis. Check the actual current persistent policy; exclude already allowed,
+currently denied, unsafe, sensitive and unsupported commands. Unknown remains ASK.
 
-Inspect every candidate's observed examples, approval count, session/target diversity, generalized regex, and excluded variants. Prefer several narrow rules to a broad expression. Every new rule needs positive and negative boundary tests.
+Connection `agent_session_id` values are not independent investigations. Gate
+requires distinct nonempty operator-named target contexts and repeated distinct successful manual
+approvals (default minimum 3, never less than 2). Verify that target contexts are
+actually independent needs, not reattachments to the same system used to inflate
+evidence. If that cannot be established, report pending evidence and do not publish.
+Do not turn one-time or target-scoped approval into a global rule automatically.
 
-Only when the user explicitly asks to create the policy proposal, run the configured workflow:
+For each candidate, check sanitized observed examples, target diversity, usefulness,
+bounded grammar and positive/negative tests. Follow
+[testing and publishing](references/testing-and-publishing.md). Reject regressions,
+unsafe allowances, missing evidence or failing checks. When no candidate qualifies,
+report that outcome; do not create an empty PR.
+
+Analysis needs no publishing configuration. When the operator has configured
+`policy-review.yaml` with `automated_pr: true`, the configured repository and
+publishing credentials, eligible proposals may run without another session prompt:
 
 ```bash
-./gate policy-review propose --config ~/.config/gate/policy-review.yaml
+./gate policy-review propose --automatic --config <configured-path>
 ```
 
-That command clones or fetches the configured upstream policy repository, creates a `gate/policy-suggestions/...` branch, edits policy and tests, validates them, commits, pushes, and opens a pull request. Check its generated PR description for redaction and safety rationale.
+Explicit user-requested proposals may use `propose --config <configured-path>`
+without automatic mode. If the repository or publishing authority is missing,
+perform analysis and recommendations only; do not invent a repository or push.
+Preserve configured base branch, policy path and test path. Equivalent pending
+proposals reuse a stable branch/PR rather than opening duplicates.
 
-Stop after reporting the branch and pull-request URL. Do not merge the PR, deploy policy, copy rules into the active Gate policy, or convert a one-time/target-scoped approval into persistent state. A human must review and merge; deployment remains a separate human-controlled action.
+Report considered commands (sanitized), candidates/rejections and reasons,
+approval counts/independent contexts, tests run and their actual pass/fail results,
+pending evidence and an existing/new PR URL when applicable. Analysis alone does
+not mean regexp tests ran. Stop before merge, deployment or loading persistent
+policy. Human review/merge and separately authorized deployment remain required.

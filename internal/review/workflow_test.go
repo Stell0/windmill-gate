@@ -2,21 +2,22 @@ package review
 
 import (
 	"context"
+	"fmt"
+	"github.com/stell0/windmill-gate/internal/policy"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestApplyCandidatesAddsRulesAndBoundaryTests(t *testing.T) {
 	policyData := []byte("validated_allow:\n  - regexp: '^pgrep(?: .*)?$'\n    validator: diagnostic_read\nallow: []\ndeny:\n  - '^systemctl restart\\\\b'\n")
 	testsData := []byte("allow: []\nask: []\ndeny: []\n")
 	candidate := Candidate{
-		Pattern:       `^grep timeout /var/log/messages$`,
-		Examples:      []string{"grep timeout /var/log/messages"},
-		NegativeTests: []string{"grep timeout /var/log/messages --unexpected"},
+		Pattern:       `^free -m$`,
+		Examples:      []string{"free -m"},
+		NegativeTests: []string{"free -m --unexpected"},
 	}
 	updatedPolicy, updatedTests, err := ApplyCandidates(policyData, testsData, []Candidate{candidate})
 	if err != nil {
@@ -31,36 +32,14 @@ func TestApplyCandidatesAddsRulesAndBoundaryTests(t *testing.T) {
 }
 
 func TestWorkflowCreatesBranchPushAndPRButNeverMerge(t *testing.T) {
-	source := filepath.Join(t.TempDir(), "source")
-	if err := os.MkdirAll(filepath.Join(source, "policy", "tests"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(source, "policy", "default.yaml"), []byte("allow: []\ndeny: []\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(source, "policy", "tests", "default.yaml"), []byte("allow: []\nask: []\ndeny: []\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	for _, args := range [][]string{
-		{"init", "-b", "main"},
-		{"config", "user.name", "Test"},
-		{"config", "user.email", "test@example.invalid"},
-		{"add", "."},
-		{"commit", "-m", "initial"},
-	} {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = source
-		if output, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v: %s", args, err, output)
-		}
-	}
+	source := workflowSource(t, false)
 	runner := &recordingRunner{}
-	workflow := Workflow{Runner: runner, Now: func() time.Time { return time.Date(2026, 9, 2, 12, 0, 0, 0, time.UTC) }}
+	workflow := Workflow{Runner: runner}
 	candidate := Candidate{
-		Pattern: `^grep timeout /var/log/messages$`, Examples: []string{"grep timeout /var/log/messages"},
+		Pattern: `^free -m$`, Examples: []string{"free -m"},
 		Approvals: 3, Sessions: 2, Targets: 2,
 		AllowedSpace: "only the exact command", Excluded: []string{"additional arguments"},
-		NegativeTests: []string{"grep timeout /var/log/messages --unexpected"},
+		NegativeTests: []string{"free -m --unexpected"},
 	}
 	proposal, err := workflow.Propose(context.Background(), Config{
 		PolicyRepository: source, BaseBranch: "main",
@@ -69,8 +48,18 @@ func TestWorkflowCreatesBranchPushAndPRButNeverMerge(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if proposal.Branch != "gate/policy-suggestions/20260902-120000-session-safe" || proposal.PullURL != "https://example.invalid/pull/1" {
+	if !strings.HasPrefix(proposal.Branch, "gate/policy-suggestions/") || proposal.PullURL != "https://example.invalid/pull/1" {
 		t.Fatalf("unexpected proposal: %#v", proposal)
+	}
+	cmd := exec.Command("git", "show", "refs/heads/"+proposal.Branch+":policy/default.yaml")
+	cmd.Dir = source
+	pushed, err := cmd.Output()
+	if err != nil || !strings.Contains(string(pushed), candidate.Pattern) {
+		t.Fatalf("local upstream did not receive tested branch: %v", err)
+	}
+	active, err := os.ReadFile(filepath.Join(source, "policy", "default.yaml"))
+	if err != nil || string(active) != "allow: []\ndeny: []\n" {
+		t.Fatal("upstream active checkout changed")
 	}
 	joined := strings.Join(runner.calls, "\n")
 	if strings.Contains(joined, "git merge ") || strings.Contains(joined, "gh pr merge") || strings.Contains(joined, " gate deploy ") {
@@ -108,21 +97,37 @@ func TestWorkflowRejectsCandidateNotDerivedFromSafeHistory(t *testing.T) {
 }
 
 type recordingRunner struct {
-	calls  []string
-	policy string
-	tests  string
-	body   string
+	calls     []string
+	policy    string
+	tests     string
+	body      string
+	existing  string
+	failCheck string
+	checks    []string
+	mutate    bool
 }
 
 func (r *recordingRunner) Run(ctx context.Context, directory, name string, args ...string) (string, error) {
-	r.calls = append(r.calls, name+" "+strings.Join(args, " "))
-	if name == "git" && len(args) > 0 && args[0] == "push" {
+	call := name + " " + strings.Join(args, " ")
+	r.calls = append(r.calls, call)
+	if name == "make" || name == "go" {
+		r.checks = append(r.checks, call)
+		if call == r.failCheck {
+			return "", fmt.Errorf("fixture check failure")
+		}
+		if r.mutate {
+			_ = os.WriteFile(filepath.Join(directory, "policy", "default.yaml"), []byte("allow: ['.*']\n"), 0o644)
+		}
 		return "", nil
+	}
+	if name == "gh" && len(args) > 1 && args[1] == "list" {
+		return r.existing, nil
 	}
 	if name == "gh" {
 		for index, arg := range args {
-			if arg == "--body" && index+1 < len(args) {
-				r.body = args[index+1]
+			if arg == "--body-file" && index+1 < len(args) {
+				body, _ := os.ReadFile(args[index+1])
+				r.body = string(body)
 			}
 		}
 		data, _ := os.ReadFile(filepath.Join(directory, "policy", "default.yaml"))
@@ -135,4 +140,108 @@ func (r *recordingRunner) Run(ctx context.Context, directory, name string, args 
 	cmd.Dir = directory
 	output, err := cmd.CombinedOutput()
 	return strings.TrimSpace(string(output)), err
+}
+
+func TestRejectUnboundedRuleEvenWithCuratedTests(t *testing.T) {
+	c := Candidate{Pattern: `^journalctl -u [a-zA-Z0-9_.@-]+ -n [0-9]+$`, Examples: []string{"journalctl -u redis -n 100"}}
+	if _, _, err := ApplyCandidates([]byte("allow: []\n"), []byte("allow: []\n"), []Candidate{c}); err == nil {
+		t.Fatal("unsafe old regexp accepted")
+	}
+}
+func TestOriginalSuiteCannotRegress(t *testing.T) {
+	c, _ := generalize("free -m")
+	c.Examples = []string{"free -m"}
+	if _, _, err := ApplyCandidates([]byte("allow: []\n"), []byte("ask:\n  - command: free -m\n    expect: ASK\n"), []Candidate{c}); err == nil {
+		t.Fatal("original suite regression accepted")
+	}
+}
+func TestOnlyExplicitPositiveDifferentialChanges(t *testing.T) {
+	c, _ := generalize("free -m")
+	c.Examples = []string{"free -m"}
+	before, _ := policy.New(policy.Config{})
+	after, _ := policy.New(policy.Config{Allow: []string{`.*`}})
+	if err := validateDifferential(before, after, policy.TestSuite{}, []Candidate{c}); err == nil {
+		t.Fatal("adversarial broad allowance accepted")
+	}
+}
+
+func workflowSource(t *testing.T, withGo bool) string {
+	t.Helper()
+	source := filepath.Join(t.TempDir(), "source")
+	if err := os.MkdirAll(filepath.Join(source, "policy", "tests"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "policy", "default.yaml"), []byte("allow: []\ndeny: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "policy", "tests", "default.yaml"), []byte("allow: []\nask: []\ndeny: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"init", "-b", "main"},
+		{"config", "user.name", "Test"},
+		{"config", "user.email", "test@example.invalid"},
+		{"add", "."},
+		{"commit", "-m", "initial"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = source
+		if output, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, output)
+		}
+	}
+	if withGo {
+		if err := os.WriteFile(filepath.Join(source, "go.mod"), []byte("module example.invalid/test\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cmd := exec.Command("git", "add", "go.mod")
+		cmd.Dir = source
+		if err := cmd.Run(); err != nil {
+			t.Fatal(err)
+		}
+		cmd = exec.Command("git", "commit", "-m", "source fixture")
+		cmd.Dir = source
+		if err := cmd.Run(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return source
+}
+
+func TestSourcePreflightsBeforePublish(t *testing.T) {
+	for _, failure := range []string{"", "make policy-test", "go test ./internal/policy ./internal/review", "make test", "make test-race", "mutate"} {
+		t.Run(failure, func(t *testing.T) {
+			source := workflowSource(t, true)
+			runner := &recordingRunner{failCheck: failure, mutate: failure == "mutate"}
+			c, _ := generalize("free -m")
+			c.Examples = []string{"free -m"}
+			c.Approvals = 3
+			c.Targets = 2
+			_, err := (Workflow{Runner: runner}).Propose(context.Background(), Config{PolicyRepository: source, BaseBranch: "main", PolicyPath: "policy/default.yaml", TestsPath: "policy/tests/default.yaml", MinimumApprovals: 3}, []Candidate{c}, "check")
+			calls := strings.Join(runner.calls, "\n")
+			if failure != "" {
+				if err == nil || strings.Contains(calls, "git push") || strings.Contains(calls, "gh pr create") || strings.Contains(calls, "user.name=Gate") {
+					t.Fatalf("published failed/modified preflight: %v %s", err, calls)
+				}
+			} else if err != nil || len(runner.checks) != 4 {
+				t.Fatalf("preflights not run: %v %v", err, runner.checks)
+			}
+		})
+	}
+}
+func TestEquivalentOpenPRIsReused(t *testing.T) {
+	source := workflowSource(t, false)
+	runner := &recordingRunner{existing: "https://example.invalid/pull/7"}
+	c, _ := generalize("free -m")
+	c.Examples = []string{"free -m"}
+	c.Approvals = 3
+	c.Targets = 2
+	proposal, err := (Workflow{Runner: runner}).Propose(context.Background(), Config{PolicyRepository: source, BaseBranch: "main", PolicyPath: "policy/default.yaml", TestsPath: "policy/tests/default.yaml", MinimumApprovals: 3}, []Candidate{c}, "repeat")
+	if err != nil || !proposal.Existing || proposal.PullURL != runner.existing {
+		t.Fatalf("not reused: %v %#v", err, proposal)
+	}
+	calls := strings.Join(runner.calls, "\n")
+	if strings.Contains(calls, "checkout -b") || strings.Contains(calls, "git push") || strings.Contains(calls, "gh pr create") {
+		t.Fatal(calls)
+	}
 }
