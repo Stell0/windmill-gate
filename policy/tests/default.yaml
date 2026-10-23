@@ -1,4 +1,6 @@
 allow:
+  - command: "podman ps -a --format '{{.Names}} [Status:{{.Status}}] [Restarts:{{.Restarts}}]'"
+    expect: ALLOW
   - command: "uname -a"
     expect: ALLOW
   - command: "uptime"
@@ -248,6 +250,158 @@ allow:
   - command: "runagent -m nethvoice-proxy7 podman exec rtpengine rtpengine-ctl list sessions call-00000001@example.invalid"
     expect: ALLOW
 
+  - command: "journalctl _UID=1001 --since=\"2026-10-22 08:00:00 UTC\" --no-pager -o short-iso-precise -n 1000"
+    expect: ALLOW
+  - command: "journalctl _UID=1001 --since=\"2026-10-22 08:00:00 UTC\" --until=\"2026-10-22 09:00:00 UTC\" --no-pager -o short-iso-precise -n 1000"
+    expect: ALLOW
+  - command: "journalctl _UID=1001 --since=\"2026-10-22 08:00:00 UTC\" --until=\"2026-10-22 09:00:00 UTC\" --no-pager -n 200 -o short-iso-precise"
+    expect: ALLOW
+  - command: "journalctl _UID=1001 --since=\"2026-10-22 08:00:00 UTC\" --no-pager -o short-iso-precise -n 1000 -g \"error|fail|warn|fatal|denied\""
+    expect: ALLOW
+  - command: "journalctl _UID=1001 --since=\"2026-10-22 08:00:00 UTC\" --grep=\"Cannot reload service|Timed out waiting|Ongoing reload\" --no-pager -o short-iso-precise -n 1000"
+    expect: ALLOW
+  - command: "journalctl _UID=1001 --since=\"2026-10-22 08:00:00 UTC\" --until=\"2026-10-22 09:00:00 UTC\" --grep=\"error|fail|warn|fatal|denied\" --case-sensitive=no --no-pager -o short-iso-precise -n 1000"
+    expect: ALLOW
+  - command: "journalctl _UID=1001 --since=\"2026-10-22 08:00:00 UTC\" --grep=task/module/module1 --no-pager -o short-iso-precise -n 1000"
+    expect: ALLOW
+  - command: "journalctl -t rsync-module1 --since=\"2026-10-22 08:00:00 UTC\" --no-pager -o short-iso-precise -n 1000"
+    expect: ALLOW
+  - command: "journalctl _UID=1001 _SYSTEMD_USER_UNIT=web.service --no-pager -n 200"
+    expect: ALLOW
+  - command: "podman inspect web1 worker1 --format '{{.Name}} image={{.ImageName}} status={{.State.Status}} pid={{.State.Pid}} exit={{.State.ExitCode}} started={{.State.StartedAt}} finished={{.State.FinishedAt}}'"
+    expect: ALLOW
+  - command: "runagent -m module1 podman inspect web1 worker1 --format '{{.Name}} image={{.ImageName}} status={{.State.Status}} pid={{.State.Pid}} exit={{.State.ExitCode}} started={{.State.StartedAt}} finished={{.State.FinishedAt}}'"
+    expect: ALLOW
+  - command: "journalctl _UID=1001 --since=\"2026-10-22 08:00:00 UTC\" --no-pager -n 1"
+    expect: ALLOW
+  - command: "journalctl _UID=1001 --since=\"2026-10-22 08:00:00 UTC\" --until=\"2026-10-22 09:00:00 UTC\" --no-pager -o short-iso-precise -n 1000 -g 12345"
+    expect: ALLOW
+
+  - command: "journalctl _UID=1020 --since=2026-09-03T06:45:00Z --no-pager -o short-iso-precise -n 1000"
+    expect: ALLOW
+
+  # Explicitly requested historical diagnostic forms.
+  - command: "journalctl _UID=1001 --since=\"2026-10-22 08:00:00 UTC\" --until=\"2026-10-22 08:00:00 UTC\" --no-pager -n 200 -o short-iso-precise --grep=\"ERROR:|FATAL:|Cannot reload|reload.*fail|Traceback|permission denied|assertion|reconfigur|status is|update-module.d\""
+    expect: ALLOW
+  - command: "runagent -m module1 systemctl --user show kamailio.service rtpengine.service --property=Id,ActiveState,SubState,Result,NRestarts,ExecMainStatus,ActiveEnterTimestamp --no-pager"
+    expect: ALLOW
+  - command: "runagent -m module1 podman ps -a --format \"{{.Names}} [Status:{{.Status}}] [Restarts:{{.Restarts}}]\""
+    expect: ALLOW
+  - command: "runagent -m module1 systemctl --user show nethcti-ui.service nethcti-server.service nethcti-ui-restart.service reports-api.service reports-redis.service --property=Id,LoadState,ActiveState,SubState,Result,NRestarts,ExecMainStatus,ExecMainExitTimestamp,FragmentPath --no-pager"
+    expect: ALLOW
+  - command: "journalctl _UID=1001 --since=\"2026-10-22 08:00:00 UTC\" --until=\"2026-10-22 08:00:00 UTC\" --no-pager -o short-iso-precise -n 100 -g \"Starting FreePBX|Started FreePBX|Failed to start FreePBX|freepbx.service:.*(timeout|dependency|timed out)\""
+    expect: ALLOW
+  - command: "journalctl _UID=1001 --since=\"2026-10-22 08:00:00 UTC\" --until=\"2026-10-22 08:00:00 UTC\" --no-pager -o short-iso-precise -n 100 -g \"mariadb.service:.*(timed out|timeout)|Starting mariadb server|Started mariadb server|Failed to start mariadb server\""
+    expect: ALLOW
+  - command: "journalctl _UID=1001 --since=\"2026-10-22 08:00:00 UTC\" --until=\"2026-10-22 08:00:00 UTC\" --no-pager -o short-iso-precise -n 200 -g \"tancredi.service:|Dependency failed for tancredi server|Starting tancredi server|Started tancredi server|Stopped tancredi server\""
+    expect: ALLOW
+  - command: "runagent -m module1 systemctl --user show mariadb.service freepbx.service tancredi.service --property=Id,TimeoutStartUSec,Restart,RestartUSec,StartLimitIntervalUSec,StartLimitBurst,ActiveState,SubState,Result,NRestarts --no-pager"
+    expect: ALLOW
+  - command: "runagent -m module1 systemctl --user show freepbx.service nethcti-middleware.service reports-api.service --property=Id,Requires,After,ActiveState,SubState,Result,NRestarts,MainPID --no-pager"
+    expect: ALLOW
+  - command: "runagent -m module1 systemctl --user show tancredi.service reports-ui.service default.target --property=Id,UnitFileState,ActiveState,SubState,ConditionResult,AssertResult,Wants,Requires,After,Job --no-pager"
+    expect: ALLOW
+  - command: "runagent -m module1 systemctl --user list-jobs --no-pager"
+    expect: ALLOW
+  - command: "runagent -m module1 systemctl --user show freepbx.service mariadb.service nethcti-ui.service nethcti-server.service nethcti-middleware.service tancredi.service reports-ui.service phonebook.service --property=Id,LoadState,ActiveState,SubState,Result,NRestarts,ExecMainStatus,ActiveEnterTimestamp,InactiveEnterTimestamp --no-pager"
+    expect: ALLOW
+  - command: "runagent -m module1 systemctl --user cat reports-ui.service --no-pager"
+    expect: ALLOW
+  - command: "runagent -m module1 systemctl --user cat tancredi.service --no-pager"
+    expect: ALLOW
+  - command: "runagent -m module1 systemctl --user show phonebook.service phonebook-update.service --property=Id,ActiveState,SubState,Result,NRestarts,ExecMainStatus,ActiveEnterTimestamp,InactiveEnterTimestamp --no-pager"
+    expect: ALLOW
+  - command: "vmstat -d 1 5"
+    expect: ALLOW
+  - command: "cat /proc/diskstats"
+    expect: ALLOW
+  - command: "runagent -m module1 systemctl --user show phonebook.service phonebook-update.service --property=Id,ActiveState,SubState,Result,NRestarts,ExecMainStatus,ActiveEnterTimestamp,InactiveEnterTimestamp,FragmentPath --no-pager"
+    expect: ALLOW
+  - command: "runagent -m module1 systemctl --user show reports-ui.service tancredi.service --property=Id,ActiveState,SubState,Result,NRestarts,ExecMainStatus,ActiveEnterTimestamp,InactiveEnterTimestamp,FragmentPath --no-pager"
+    expect: ALLOW
+  - command: "runagent -m module1 systemctl --user show tancredi.service get-certificate.service --property=Id,ActiveState,SubState,Result,NRestarts,ExecMainStatus,ActiveEnterTimestamp,InactiveEnterTimestamp,FragmentPath --no-pager"
+    expect: ALLOW
+  - command: "cat /proc/pressure/io"
+    expect: ALLOW
+  - command: "ps -eo pid,ppid,user:24,stat,wchan:32,etimes,comm"
+    expect: ALLOW
+  - command: "df -h /home"
+    expect: ALLOW
+  - command: "iostat -xz 1 3"
+    expect: ALLOW
+  - command: "ps -eo pid,ppid,user,stat,pcpu,pmem,etimes,comm --sort=-pcpu"
+    expect: ALLOW
+  - command: "vmstat 1 5"
+    expect: ALLOW
+  - command: "nproc"
+    expect: ALLOW
+  - command: "hostname"
+    expect: ALLOW
+  - command: "runagent -m module1 podman exec freepbx ps -p 52 -o pid,lstart,etime,args"
+    expect: ALLOW
+  - command: "runagent -m module1 podman exec freepbx ps -p 1,72 -o pid,lstart,etime,args"
+    expect: ALLOW
+  - command: "runagent -m module1 journalctl --user -u kamailio.service --since=\"2026-10-22 08:00:00 UTC\" --until=\"2026-10-22 08:00:00 UTC\" --no-pager -o short-iso-precise -n 500"
+    expect: ALLOW
+  - command: "grep PRETTY_NAME /etc/os-release"
+    expect: ALLOW
+
+  - command: "runagent -m nethvoice5 timeout 12 openssl s_client -connect sip.api.openai.com:5061 -servername sip.api.openai.com -verify_hostname sip.api.openai.com -verify_return_error < /dev/null 2>&1"
+    expect: ALLOW
+
+  - command: "date --iso-8601=seconds"
+    expect: ALLOW
+  - command: "findmnt -n -o SOURCE,FSTYPE,TARGET --target /home"
+    expect: ALLOW
+  - command: "sha256sum /home/module1/.config/bin/check /home/module1/.config/update-module.d/80restart /home/module1/.config/systemd/user/web.service"
+    expect: ALLOW
+  - command: "runagent -m module1 printenv NETHVOICE_HOST"
+    expect: ALLOW
+  - command: "runagent -m module1 printenv NETHVOICE_TANCREDI_IMAGE NETHVOICE_REPORTS_UI_IMAGE"
+    expect: ALLOW
+  - command: "runagent -m module1 printenv AGENT_INSTALL_DIR AGENT_STATE_DIR"
+    expect: ALLOW
+  - command: "runagent -m module1 podman exec web1 printenv SATELLITE_VOICEMAIL_TRANSCRIPTION_ENABLED"
+    expect: ALLOW
+  - command: "podman top web1"
+    expect: ALLOW
+  - command: "runagent -m module1 podman top web1"
+    expect: ALLOW
+  - command: "sed -n 68,160p /var/lib/asterisk/bin/send_email"
+    expect: ALLOW
+  - command: "sed -n '1140,1200p' /etc/kamailio/kamailio.cfg"
+    expect: ALLOW
+  - command: "sed -n \"1,1000p\" /etc/rtpengine/rtpengine.conf"
+    expect: ALLOW
+  - command: "runagent -m module1 podman exec kamailio grep -nE 'rtpengine|direction' /etc/kamailio/kamailio.cfg"
+    expect: ALLOW
+  - command: "runagent -m module1 podman exec rtpengine grep -E '^(interface|listen-ng|port-min|port-max)' /etc/rtpengine/rtpengine.conf"
+    expect: ALLOW
+  - command: "runagent -m module1 podman exec freepbx grep -RniE 'allow|codec' /etc/asterisk /initdb.d/update.php"
+    expect: ALLOW
+  - command: "runagent -m module1 podman exec web1 grep -RsnE 'voice|tableName' /app/plugins/dbconn/sequelize_models"
+    expect: ALLOW
+  - command: "grep -n 'Attachment' /var/lib/asterisk/bin/send_email"
+    expect: ALLOW
+  - command: "grep -n error /var/www/html/freepbx/admin/modules/nethcti3/functions.inc.php"
+    expect: ALLOW
+  - command: "asterisk -rx 'dialplan show *201@ext-local'"
+    expect: ALLOW
+  - command: "asterisk -rx \"dialplan show cti-profile-3\""
+    expect: ALLOW
+  - command: "timeout 120 tcpdump -ni any -s0 -U -c 48 -w /tmp/gate-example.pcap 'udp port 5060 or tcp port 5060 or udp port 20030 or tcp port 20030'"
+    expect: ALLOW
+  - command: "timeout 180 tcpdump -ni any -s0 -U -c 60 -w /tmp/gate-example.pcap 'udp port 5060'"
+    expect: ALLOW
+  - command: "timeout 60 tcpdump -ni any -s0 -U -w /tmp/gate-example.pcap 'udp port 5060'"
+    expect: ALLOW
+  - command: "tcpdump -nn -tttt -A -r /tmp/gate-example.pcap -c 60"
+    expect: ALLOW
+  - command: "timeout 12 openssl s_client -connect example.invalid:443 -servername example.invalid -verify_hostname example.invalid -verify_return_error < /dev/null 2>&1"
+    expect: ALLOW
+  - command: "stat -c '%n|%W|%w|%Y|%y' /home/module1 /home/module2"
+    expect: ALLOW
+
 ask:
   - command: "runagent -m module1 runagent -m nested journalctl -u redis -n 100"
     expect: ASK
@@ -276,8 +430,6 @@ ask:
   - command: "journalctl -u redis -n 0"
     expect: ASK
   - command: "journalctl -u redis -n 1001"
-    expect: ASK
-  - command: "journalctl _UID=1020 --since=2026-09-03T06:45:00Z --no-pager -o short-iso-precise -n 1000"
     expect: ASK
   - command: "journalctl _UID=1020 --since=2026-09-03T06:45:00Z --until=2026-09-03T08:30:00Z --no-pager -o json -n 1000"
     expect: ASK
@@ -385,8 +537,6 @@ ask:
     expect: ASK
   - command: "runagent -m nethvoice5 podman exec freepbx sh -c 'grep -R -n -A25 -B2 \"^\\[0.0.0.0-tls\\]\" /etc/asterisk/pjsip*.conf'"
     expect: ASK
-  - command: "runagent -m nethvoice5 timeout 12 openssl s_client -connect sip.api.openai.com:5061 -servername sip.api.openai.com -verify_hostname sip.api.openai.com -verify_return_error < /dev/null 2>&1"
-    expect: ASK
   - command: "ls /var/log/*"
     expect: ASK
   - command: "ls /var/log/../root"
@@ -466,6 +616,207 @@ ask:
   - command: "runagent -m nethvoice-proxy7 podman exec rtpengine rtpengine-ctl terminate call-00000001@example.invalid"
     expect: ASK
   - command: "runagent -m nethvoice-proxy7 podman exec rtpengine rtpengine-ctl set timeout 30"
+    expect: ASK
+
+  - command: "journalctl _UID=1001 --since=\"2026-10-22 08:00:00 UTC\" --no-pager -o short-iso-precise -n 0"
+    expect: ASK
+  - command: "journalctl _UID=1001 --since=\"2026-10-22 08:00:00 UTC\" --no-pager -o short-iso-precise -n 1001"
+    expect: ASK
+  - command: "journalctl _UID=1001 --since=\"2026-10-22 08:00:00 UTC\" --no-pager -o short-iso-precise -n 01"
+    expect: ASK
+  - command: "journalctl _UID=1001 --since=\"2026-10-22 08:00:00 UTC\" --no-pager -o short-iso-precise -n all"
+    expect: ASK
+  - command: "journalctl _UID=1001 --since=\"2026-10-22 08:00:00 UTC\" --no-pager -o short-iso-precise -n 9999999999999999999999"
+    expect: ASK
+  - command: "journalctl _UID=1001 --since=\"2026-10-22 08:00:00 UTC\"  -o short-iso-precise -n 1000"
+    expect: ASK
+  - command: "journalctl _UID=1001 --since=\"2026-10-22 08:00:00 UTC\" --no-pager -o short-iso-precise -n 1000 --follow"
+    expect: ASK
+  - command: "journalctl _UID=1001 --since=\"2026-10-22 08:00:00 UTC\" --no-pager -o short-iso-precise -n 1000 --vacuum-time=1d"
+    expect: ASK
+  - command: "journalctl _UID=1001 --since=\"2026-10-22 08:00:00 UTC\" --no-pager -o short-iso-precise -n 1000 --rotate"
+    expect: ASK
+  - command: "journalctl _UID=1001 --since=\"2026-10-22 08:00:00 UTC\" --no-pager -o short-iso-precise -n 1000 --output=json"
+    expect: ASK
+  - command: "journalctl _UID=1001 --since=\"2026-10-22 08:00:00 UTC\" --no-pager -o short-iso-precise -n 1000 -n 100"
+    expect: ASK
+  - command: "journalctl _UID=1001 --since=\"2026-10-22 08:00:00 UTC\" --no-pager -o short-iso-precise -n 1000 _UID=1002"
+    expect: ASK
+  - command: "journalctl _UID=1001 --since=\"2026-10-22 08:00:00 UTC\" --no-pager -o short-iso-precise -n 1000 --since=2026-10-22T08:00:00Z"
+    expect: ASK
+  - command: "journalctl _UID=1001 --until=\"2026-10-22 09:00:00 UTC\" --no-pager -o short-iso-precise -n 1000"
+    expect: ASK
+  - command: "journalctl _UID=1001 --since=2026-02-30T08:00:00Z --no-pager -o short-iso-precise -n 1000"
+    expect: ASK
+  - command: "journalctl _UID=1001 --since=\"2026-10-22 08:00:00 UTC\" --until=2026-10-22T07:00:00Z --no-pager -o short-iso-precise -n 1000"
+    expect: ASK
+  - command: "journalctl _UID=1001 --since=\"2026-10-22 08:00:00 UTC\" --no-pager -o short-iso-precise -n 1000 --case-sensitive=no"
+    expect: ASK
+  - command: "journalctl _UID=1001 --since=\"2026-10-22 08:00:00 UTC\" --no-pager -o short-iso-precise -n 1000 --grep=\"error|fail\" -g 12345"
+    expect: ASK
+  - command: "journalctl _UID=1001 --since=\"2026-10-22 08:00:00 UTC\" --no-pager -o short-iso-precise -n 1000 --grep=\"(a+)+$\""
+    expect: ASK
+  - command: "journalctl _UID=1001 --since=\"2026-10-22 08:00:00 UTC\" --no-pager -o short-iso-precise -n 1000 --grep=\"error||fail\""
+    expect: ASK
+  - command: "journalctl _UID=1001 --since=\"2026-10-22 08:00:00 UTC\" --no-pager -o short-iso-precise -n 1000 --grep=\"error|.*\""
+    expect: ASK
+  - command: "journalctl -t --all --since=\"2026-10-22 08:00:00 UTC\" --no-pager -o short-iso-precise -n 1000"
+    expect: ASK
+  - command: "journalctl -t ../tag --since=\"2026-10-22 08:00:00 UTC\" --no-pager -o short-iso-precise -n 1000"
+    expect: ASK
+  - command: "journalctl -t tag _SYSTEMD_USER_UNIT=web.service --since=\"2026-10-22 08:00:00 UTC\" --no-pager -o short-iso-precise -n 1000"
+    expect: ASK
+  - command: "journalctl _UID=1001 _SYSTEMD_USER_UNIT=../web --no-pager -n 100"
+    expect: ASK
+  - command: "podman inspect --latest --format '{{.Name}} image={{.ImageName}} status={{.State.Status}} pid={{.State.Pid}} exit={{.State.ExitCode}} started={{.State.StartedAt}} finished={{.State.FinishedAt}}'"
+    expect: ASK
+  - command: "podman inspect ../web1 --format '{{.Name}} image={{.ImageName}} status={{.State.Status}} pid={{.State.Pid}} exit={{.State.ExitCode}} started={{.State.StartedAt}} finished={{.State.FinishedAt}}'"
+    expect: ASK
+  - command: "podman inspect web1 worker1 --format '{{.Name}} image={{.ImageName}} status={{.State.Status}} pid={{json .Config.Env}} exit={{.State.ExitCode}} started={{.State.StartedAt}} finished={{.State.FinishedAt}}'"
+    expect: ASK
+  - command: "podman --remote inspect web1 worker1 --format '{{.Name}} image={{.ImageName}} status={{.State.Status}} pid={{.State.Pid}} exit={{.State.ExitCode}} started={{.State.StartedAt}} finished={{.State.FinishedAt}}'"
+    expect: ASK
+  - command: "podman inspect web0 web1 web2 web3 web4 web5 web6 web7 web8 web9 web10 web11 web12 web13 web14 web15 web16 --format '{{.Name}} image={{.ImageName}} status={{.State.Status}} pid={{.State.Pid}} exit={{.State.ExitCode}} started={{.State.StartedAt}} finished={{.State.FinishedAt}}'"
+    expect: ASK
+  - command: "podman inspect aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --format '{{.Name}} image={{.ImageName}} status={{.State.Status}} pid={{.State.Pid}} exit={{.State.ExitCode}} started={{.State.StartedAt}} finished={{.State.FinishedAt}}'"
+    expect: ASK
+  - command: "podman inspect web1 worker1 --format '{{.Name}} image={{.ImageName}} status={{.State.Status}} pid={{.State.Pid}} exit={{.State.ExitCode}} started={{.State.StartedAt}} finished={{.State.FinishedAt}}' --size"
+    expect: ASK
+  - command: "runagent -m module1 runagent -m module2 podman inspect web1 worker1 --format '{{.Name}} image={{.ImageName}} status={{.State.Status}} pid={{.State.Pid}} exit={{.State.ExitCode}} started={{.State.StartedAt}} finished={{.State.FinishedAt}}'"
+    expect: ASK
+  - command: "runagent -m module1 podman exec --privileged web1 podman inspect web1 worker1 --format '{{.Name}} image={{.ImageName}} status={{.State.Status}} pid={{.State.Pid}} exit={{.State.ExitCode}} started={{.State.StartedAt}} finished={{.State.FinishedAt}}'"
+    expect: ASK
+  - command: "podman inspect web1 worker1 --format '{{.Name}} image={{.ImageName}} status={{.State.Status}} pid={{.State.Pid}} exit={{.State.ExitCode}} started={{.State.StartedAt}} finished={{.State.FinishedAt}}' | cat"
+    expect: ASK
+  - command: "journalctl _UID=1001 --since=\"2026-10-22 08:00:00 UTC\" --no-pager -o short-iso-precise -n 1000 > /tmp/out"
+    expect: ASK
+  - command: "journalctl _UID=1001 --since=\"2026-10-22 08:00:00 UTC\" --no-pager -o short-iso-precise -n 1000 && uptime"
+    expect: ASK
+
+  - command: "systemctl --user show web.service worker.service --property=Id --no-pager --value"
+    expect: ASK
+  - command: "systemctl --user show web.service --property=Id --no-pager --root=/tmp"
+    expect: ASK
+  - command: "systemctl --user cat ../web.service --no-pager"
+    expect: ASK
+  - command: "systemctl --user cat web.service"
+    expect: ASK
+  - command: "systemctl --user cat web.service --no-pager --root=/tmp"
+    expect: ASK
+  - command: "systemctl --user list-jobs --no-pager --after"
+    expect: ASK
+  - command: "systemctl --user list-jobs"
+    expect: ASK
+  - command: "podman ps -a --format \"{{json .}}\""
+    expect: ASK
+  - command: "podman ps -a --format \"{{.Names}} [Status:{{.Status}}] [Restarts:{{.Restarts}}]\" --watch"
+    expect: ASK
+  - command: "df -h /root"
+    expect: ASK
+  - command: "hostname customer.example"
+    expect: ASK
+  - command: "nproc --ignore=1"
+    expect: ASK
+  - command: "iostat -xz 1"
+    expect: ASK
+  - command: "iostat -xz 0 5"
+    expect: ASK
+  - command: "iostat -xz 1 0"
+    expect: ASK
+  - command: "iostat -xz 1 11"
+    expect: ASK
+  - command: "vmstat 1"
+    expect: ASK
+  - command: "vmstat -d 1"
+    expect: ASK
+  - command: "vmstat 0 5"
+    expect: ASK
+  - command: "vmstat 1 0"
+    expect: ASK
+  - command: "vmstat -d 01 5"
+    expect: ASK
+  - command: "ps -eo pid,environ"
+    expect: ASK
+  - command: "ps -p 1 -o pid,lstart,etime,args --forest"
+    expect: ASK
+  - command: "ps -p -1 -o pid,lstart,etime,args"
+    expect: ASK
+  - command: "cat /proc/1/environ"
+    expect: ASK
+  - command: "cat /proc/diskstats /etc/shadow"
+    expect: ASK
+  - command: "grep PRETTY_NAME /etc/shadow"
+    expect: ASK
+  - command: "grep ROOT_PASSWORD /etc/os-release"
+    expect: ASK
+  - command: "journalctl --user -u web.service --since=2026-10-22T08:00:00Z --until=2026-10-22T07:00:00Z --no-pager -n 100"
+    expect: ASK
+  - command: "journalctl --user -u web.service --since=2026-10-22T08:00:00Z --no-pager -n 1001"
+    expect: ASK
+  - command: "journalctl --user -u web.service --since=2026-10-22T08:00:00Z --no-pager -n 100 --follow"
+    expect: ASK
+  - command: "journalctl --user -u web.service --since=2026-10-22T08:00:00Z --no-pager -n 100 --directory=/private"
+    expect: ASK
+  - command: "journalctl --user -u web.service _UID=1001 --no-pager -n 100"
+    expect: ASK
+  - command: "runagent -m module1 runagent -m module2 systemctl --user cat web.service --no-pager"
+    expect: ASK
+  - command: "runagent -m module1 podman exec --privileged web1 hostname"
+    expect: ASK
+  - command: "hostname > /tmp/name"
+    expect: ASK
+  - command: "nproc && uptime"
+    expect: ASK
+  - command: "vmstat 1 5 | sh"
+    expect: ASK
+
+  - command: "printenv"
+    expect: ASK
+  - command: "printenv PASSWORD"
+    expect: ASK
+  - command: "printenv NETHVOICE_HOST API_TOKEN"
+    expect: ASK
+  - command: "date --set=2026-10-22"
+    expect: ASK
+  - command: "sha256sum /home/module1/.config/environment"
+    expect: ASK
+  - command: "sha256sum /home/module1/.config/bin/../environment"
+    expect: ASK
+  - command: "podman top --latest"
+    expect: ASK
+  - command: "podman top web1 environ"
+    expect: ASK
+  - command: "sed -n 1,20p /etc/shadow"
+    expect: ASK
+  - command: "sed -n 1,20p *"
+    expect: ASK
+  - command: "sed -n 1,1001p /etc/kamailio/kamailio.cfg"
+    expect: ASK
+  - command: "sed -n 0,20p /etc/kamailio/kamailio.cfg"
+    expect: ASK
+  - command: "sed -n \"1,20w /tmp/out\" /etc/kamailio/kamailio.cfg"
+    expect: ASK
+  - command: "grep -n password /app/.env"
+    expect: ASK
+  - command: "grep -n password /run/secrets/database"
+    expect: ASK
+  - command: "grep -R root /etc"
+    expect: ASK
+  - command: "timeout 181 tcpdump -ni any -s0 -U -w /tmp/gate-example.pcap 'udp port 5060'"
+    expect: ASK
+  - command: "timeout 60 tcpdump -ni any -s0 -U -w /etc/shadow 'udp port 5060'"
+    expect: ASK
+  - command: "timeout 60 tcpdump -ni any -s0 -U -z /tmp/program -w /tmp/gate-example.pcap 'udp port 5060'"
+    expect: ASK
+  - command: "tcpdump -nn -tttt -A -r /etc/shadow -c 60"
+    expect: ASK
+  - command: "timeout 12 openssl s_client -connect example.invalid:443 -servername other.invalid -verify_hostname example.invalid -verify_return_error < /dev/null 2>&1"
+    expect: ASK
+  - command: "timeout 12 openssl s_client -connect example.invalid:443 -servername example.invalid -verify_hostname example.invalid -verify_return_error < /etc/shadow 2>&1"
+    expect: ASK
+  - command: "timeout 12 openssl s_client -connect example.invalid:443 -servername example.invalid -verify_hostname example.invalid -verify_return_error < /dev/null 2>&1; uptime"
+    expect: ASK
+  - command: "stat -c %n|%W|%w|%Y|%y /home/module1"
     expect: ASK
 
 deny:

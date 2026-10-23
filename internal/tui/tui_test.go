@@ -432,6 +432,28 @@ func TestTerminalAttentionAndClearSequences(t *testing.T) {
 	}
 }
 
+func TestApprovalBellOnlyForNewPendingRequests(t *testing.T) {
+	for _, terminal := range []bool{true, false} {
+		var output bytes.Buffer
+		app := App{Output: &output, terminalOutput: terminal}
+		first := approval.Pending{Command: command.Snapshot{ID: "cmd_first"}}
+		second := approval.Pending{Command: command.Snapshot{ID: "cmd_second"}}
+		app.notifyPending(nil)
+		app.notifyPending([]approval.Pending{first}) // startup or arrival
+		app.notifyPending([]approval.Pending{first}) // repeated wakeup/redraw
+		app.notifyPending([]approval.Pending{first, second})
+		app.notifyPending([]approval.Pending{second}) // decision/cancellation
+		app.notifyPending(nil)
+		want := ""
+		if terminal {
+			want = "\a\a"
+		}
+		if got := output.String(); got != want {
+			t.Fatalf("terminal=%v: bell output = %q, want %q", terminal, got, want)
+		}
+	}
+}
+
 func TestApprovalRedrawClearsScreen(t *testing.T) {
 	store, err := storage.Open(filepath.Join(t.TempDir(), "gate.db"))
 	if err != nil {

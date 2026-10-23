@@ -155,6 +155,29 @@ func TestAskWaitsForHashBoundHumanApproval(t *testing.T) {
 	}
 }
 
+func TestTLSProbeRedirectExceptionExecutesAndAuditsExactBytes(t *testing.T) {
+	implementation := &fakeBackend{}
+	service, session, store := seededService(t, implementation, policy.Config{
+		ValidatedAllow: []policy.ValidatedRule{{Regexp: `^timeout .+$`, Validator: "tls_probe"}},
+	})
+	defer store.Close()
+	payload := []byte("runagent -m module1 timeout 12 openssl s_client -connect example.invalid:443 -servername example.invalid -verify_hostname example.invalid -verify_return_error < /dev/null 2>&1")
+	sink := &recordingSink{}
+	if err := session.Exec(context.Background(), payload, sink); err != nil {
+		t.Fatal(err)
+	}
+	if sink.policy.Decision != policy.Allow || len(implementation.payloads) != 1 || !bytes.Equal(implementation.payloads[0], payload) {
+		t.Fatalf("TLS redirect classification changed execution: decision=%s payloads=%q", sink.policy.Decision, implementation.payloads)
+	}
+	history, err := service.Store.History(context.Background(), session.ID, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(history) != 1 || history[0].Command != string(payload) || history[0].Hash != command.Hash(payload) || history[0].State != command.Succeeded {
+		t.Fatalf("TLS redirect bytes/hash were not preserved in audit: %#v", history)
+	}
+}
+
 func TestDeniedCommandNeverReachesBackend(t *testing.T) {
 	implementation := &fakeBackend{}
 	_, session, store := seededService(t, implementation, policy.Config{Deny: []string{`^reboot$`}})

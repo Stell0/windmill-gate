@@ -11,11 +11,17 @@ var validators = map[string]func([]shellWord) bool{
 	"asterisk_config_slice": validateAsteriskConfigSlice,
 	"container_grep":        validateContainerGrep,
 	"diagnostic_read":       validateDiagnosticRead,
+	"diagnostic_slice":      validateDiagnosticSlice,
+	"source_grep":           validateSourceGrep,
+	"module_checksums":      validateModuleChecksums,
+	"packet_capture":        validatePacketCapture,
+	"tls_probe":             validateTLSProbe,
 	"mysql_read":            validateMySQLRead,
 	"mysql_select":          validateMySQLSelect,
 	"mysql_shell_read":      validateMySQLShellRead,
 	"rtpengine_read":        validateRTPengineRead,
 	"uid_journal":           validateUIDJournal,
+	"scoped_journal":        validateScopedJournal,
 }
 
 func validateAsteriskConfigSlice(words []shellWord) bool {
@@ -251,7 +257,14 @@ func validateContainerGrep(words []shellWord) bool {
 		words[6].value != "grep" {
 		return false
 	}
-	operands, ok := parseGrepOperands(words[7:])
+	return validateSourceGrep(words[6:])
+}
+
+func validateSourceGrep(words []shellWord) bool {
+	if len(words) < 3 || words[0].value != "grep" {
+		return false
+	}
+	operands, ok := parseGrepOperands(words[1:])
 	if !ok {
 		return false
 	}
@@ -268,6 +281,9 @@ func containerGrepPath(value string) bool {
 		return false
 	}
 	if pathWithin(value, "/var/log") {
+		return true
+	}
+	if diagnosticSourcePath(value) || value == "/etc/asterisk" || value == "/app/plugins/dbconn/sequelize_models" {
 		return true
 	}
 	return pathWithin(value, "/app") && strings.HasSuffix(value, ".js") ||

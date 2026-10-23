@@ -24,11 +24,12 @@ type App struct {
 	Input    io.Reader
 	Output   io.Writer
 
-	discovered     []backend.Target
-	singleKeyInput bool
-	terminalOutput bool
-	ledger         []storage.AuthorizationEntry
-	ledgerSeen     map[string]bool
+	discovered      []backend.Target
+	singleKeyInput  bool
+	terminalOutput  bool
+	ledger          []storage.AuthorizationEntry
+	ledgerSeen      map[string]bool
+	notifiedPending map[string]bool
 }
 
 func (a *App) Run(ctx context.Context) error {
@@ -70,6 +71,7 @@ func (a *App) Run(ctx context.Context) error {
 	a.renderAuthorizationLedger()
 	pending := a.Service.Approvals.List()
 	pendingCount.Store(int64(len(pending)))
+	a.notifyPending(pending)
 	a.setTerminalTitle(len(pending) > 0)
 	a.renderPendingItems(pending)
 	displayedPending := pendingSignature(pending)
@@ -87,6 +89,7 @@ func (a *App) Run(ctx context.Context) error {
 		case <-a.Service.Approvals.Changed():
 			pending := a.Service.Approvals.List()
 			pendingCount.Store(int64(len(pending)))
+			a.notifyPending(pending)
 			a.setTerminalTitle(len(pending) > 0)
 			signature := pendingSignature(pending)
 			if signature == displayedPending {
@@ -110,6 +113,7 @@ func (a *App) Run(ctx context.Context) error {
 			}
 			pending := a.Service.Approvals.List()
 			pendingCount.Store(int64(len(pending)))
+			a.notifyPending(pending)
 			a.setTerminalTitle(len(pending) > 0)
 			if a.terminalOutput {
 				a.redraw(pending)
@@ -132,6 +136,7 @@ func (a *App) Run(ctx context.Context) error {
 			}
 			pending := a.Service.Approvals.List()
 			pendingCount.Store(int64(len(pending)))
+			a.notifyPending(pending)
 			a.setTerminalTitle(len(pending) > 0)
 			signature := pendingSignature(pending)
 			if err == nil && decisionInput {
@@ -275,6 +280,19 @@ func (a *App) redraw(pending []approval.Pending) {
 	a.renderTargets()
 	a.renderAuthorizationLedger()
 	a.renderPendingItems(pending)
+}
+
+// notifyPending rings once for each newly waiting request, including requests
+// already pending at startup. Rendering or removing requests never rings.
+func (a *App) notifyPending(pending []approval.Pending) {
+	next := make(map[string]bool, len(pending))
+	for _, item := range pending {
+		next[item.Command.ID] = true
+		if a.terminalOutput && !a.notifiedPending[item.Command.ID] {
+			fmt.Fprint(a.Output, "\a")
+		}
+	}
+	a.notifiedPending = next
 }
 
 func (a *App) setTerminalTitle(waiting bool) {

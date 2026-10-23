@@ -96,6 +96,10 @@ Windows:
 .\gate-sh.exe --agent codex-1 -c "uname -a"
 ```
 
+Gate sends a terminal bell (BEL) for each newly waiting approval, including
+requests already pending when the console opens. Enable audible bells in your
+terminal settings to hear it; redraws do not ring again.
+
 When a command needs a decision, use the Gate operator terminal:
 
 ```text
@@ -219,11 +223,49 @@ arbitrary targets, or silently make temporary approvals permanent.
 
 ### Policy
 
-The bundled policy automatically allows only narrow, read-only diagnostics.
+The bundled policy automatically allows narrow diagnostics, including explicitly
+bounded packet captures that write to Gate-named files under `/tmp`.
 Anchored expressions and semantic validators constrain arguments, quoting,
 shell composition, and supported NS8 wrappers. Unmatched or malformed commands
 remain `ASK` unless a deny rule matches. Classification never rewrites the
 approved command.
+
+Journal reads scoped to one UID, syslog tag or user unit support optional UTC time
+bounds, 1–1000 lines and mandatory `--no-pager`. Filters accept bounded IDs, task
+selectors, simple diagnostic alternatives and three fixed service-error
+expressions; general regular expressions still require approval.
+Container inspection additionally permits a fixed runtime-state projection for
+up to 8 named containers, including through the existing strict `runagent`
+wrapper. Raw inspection and environment projections still require approval.
+
+User-service diagnostics allow `show` for up to eight explicit units, `cat` for
+one unit, and `list-jobs`, with `--no-pager`. The fixed Podman container-status
+format accepts either single or double quotes. Host checks include `df -h /home`,
+`hostname`, `nproc`, the disk/IO pressure accounting files and the exact
+`grep PRETTY_NAME /etc/os-release` query. Performance sampling permits `iostat -xz`
+and `vmstat` (optionally `-d`) with both an interval and report count of 1–10.
+Process inspection uses fixed diagnostic column lists and at most 16 explicit
+PIDs. These rules also inherit through the existing strict wrapper views.
+
+Additional rules cover the exact ISO date and mount-source queries, module script
+checksums, named diagnostic environment variables, container process lists and
+quoted Asterisk dialplan selectors. `sed -n START,ENDp FILE` accepts at most 1000
+lines from known diagnostic source/configuration or log files, with optional
+quotes around the range. Grep supports the observed Kamailio, RTPengine, Asterisk
+and application source paths. Arbitrary files, shell globs, sed programs and
+password/token environment variables still require approval.
+
+Live SIP captures require `timeout` of 1–180 seconds, a fixed `any` interface,
+ports 5060/5061/20030, and a `/tmp/gate-NAME.pcap` output path. Capture replay
+requires a 1–1000 packet limit. These rules intentionally authorize capture-file
+writes; execution deadlines do not impose a file-size limit.
+
+TLS certificate probes require a 1–30 second timeout, port 443 or 5061, matching
+connection/SNI/verification hostnames, and the exact `< /dev/null 2>&1` suffix.
+That suffix is a specific parser exception; other redirections and pipelines
+remain `ASK`. Gate classifies and executes the original command bytes unchanged.
+For pipe-separated timestamps, use `stat -c '%n|%W|%w|%Y|%y' /home/MODULE`;
+the unquoted form is a shell pipeline and still requires approval.
 
 For NethVoice, bounded database reads run through the `mariadb` container's
 fixed credential wrapper. Direct MySQL commands in `freepbx` are not part of

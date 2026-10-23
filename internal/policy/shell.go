@@ -152,6 +152,11 @@ func commandViews(command string) ([]commandView, error) {
 	var parseErr error
 	for _, text := range texts {
 		words, err := tokenizeShell(text)
+		if err != nil {
+			if probeWords, ok := tokenizeTLSRedirect(text); ok {
+				words, err = probeWords, nil
+			}
+		}
 		views = append(views, commandView{text: text, words: words})
 		if parseErr == nil && err != nil {
 			parseErr = err

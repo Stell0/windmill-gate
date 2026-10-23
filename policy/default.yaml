@@ -1,5 +1,6 @@
 # Gate's persistent policy is deliberately narrow. DENY rules take precedence;
-# anything unmatched or shell-composed is ASK.
+# anything unmatched or shell-composed is ASK, except the exact bounded TLS
+# probe with /dev/null input and a fixed stderr merge described below.
 #
 # NethServer rules below originate from NethServer/agents commit
 # 7d8690e07002b19f99fd92155100b772281282bb and operator-reviewed diagnostics.
@@ -14,6 +15,22 @@ validated_allow:
     validator: asterisk_config_slice
   - regexp: '^(?:ls|cat|tail|grep|egrep|pgrep)(?: .*)?$'
     validator: diagnostic_read
+  # Print-only ranges of 1-1000 lines from diagnostic source/log files. Never
+  # execute arbitrary sed programs, glob paths, or admit in-place edits.
+  - regexp: '^sed -n (?:[0-9]+,[0-9]+p|''[0-9]+,[0-9]+p''|"[0-9]+,[0-9]+p") [^ ]+$'
+    validator: diagnostic_slice
+  - regexp: '^sha256sum(?: /home/[^ ]+)+$'
+    validator: module_checksums
+  - regexp: '^grep(?: .*)?$'
+    validator: source_grep
+  # Live capture writes are explicit: only /tmp/gate-*.pcap, SIP ports and a
+  # 1-180 second deadline. Replays require a 1-1000 packet limit.
+  - regexp: '^(?:timeout [0-9]+ tcpdump|tcpdump)(?: .*)?$'
+    validator: packet_capture
+  # The parser recognizes only this exact redirect suffix for this grammar.
+  # Require EOF on stdin, certificate verification and one matching host.
+  - regexp: '^timeout [0-9]+ openssl s_client -connect [a-zA-Z0-9.-]+:(?:443|5061) -servername [a-zA-Z0-9.-]+ -verify_hostname [a-zA-Z0-9.-]+ -verify_return_error < /dev/null 2>&1$'
+    validator: tls_probe
   # Container grep accepts multiple files only inside application, Asterisk,
   # and log trees, rather than exposing arbitrary paths or secret mounts.
   - regexp: '^runagent -m [a-zA-Z0-9][a-zA-Z0-9_.-]* podman exec [a-zA-Z0-9][a-zA-Z0-9_.-]* grep(?: .*)?$'
@@ -24,6 +41,12 @@ validated_allow:
     validator: mysql_shell_read
   - regexp: '^journalctl _UID=[^ ]+ --since=.+ --until=.+ --no-pager -o short-iso-precise -n [^ ]+(?: -g [^ ]+)?$'
     validator: uid_journal
+  # Reviewed journal reads: one UID, syslog tag or user unit, optional UTC time
+  # bounds, mandatory no-pager and 1-1000 lines. Filters admit bounded IDs,
+  # simple alternatives and three exact reviewed service-error expressions.
+  # Unknown/repeated options and general PCRE programs remain ASK.
+  - regexp: '^journalctl (?:_UID=[0-9]{1,10}|-t [a-zA-Z0-9][a-zA-Z0-9_.@-]{0,127}|--user -u [a-zA-Z0-9][a-zA-Z0-9_.@-]{0,127}) .+$'
+    validator: scoped_journal
   # Keep RTPengine access on the exact proxy/container boundary. The validator
   # admits help and one bounded Call-ID lookup, never aggregate or control verbs.
   - regexp: '^runagent -m nethvoice-proxy[0-9]+ podman exec rtpengine rtpengine-ctl(?: .*)?$'
@@ -34,14 +57,32 @@ allow:
   - '^uname(?: -a)?$'
   - '^uptime$'
   - '^df(?: -h)?$'
+  - '^df -h /home$'
   - '^free(?: -[hm])?$'
   - '^hostnamectl --static$'
+  - '^hostname$'
+  - '^nproc$'
+  - '^date --iso-8601=seconds$'
+  # Only named diagnostic variables, never the complete environment or
+  # arbitrary password/token variables. Existing strict wrappers inherit it.
+  - '^printenv (?:NETHVOICE_HOST|NETHVOICE_TANCREDI_IMAGE|NETHVOICE_REPORTS_UI_IMAGE|AGENT_INSTALL_DIR|AGENT_STATE_DIR|SATELLITE_VOICEMAIL_TRANSCRIPTION_ENABLED)(?: (?:NETHVOICE_HOST|NETHVOICE_TANCREDI_IMAGE|NETHVOICE_REPORTS_UI_IMAGE|AGENT_INSTALL_DIR|AGENT_STATE_DIR|SATELLITE_VOICEMAIL_TRANSCRIPTION_ENABLED)){0,7}$'
   - '^id(?: -u [a-zA-Z0-9][a-zA-Z0-9_.-]*)?$'
+
+  # Finite performance samples: 1-10 seconds apart, 1-10 reports. Process
+  # reads use only the observed fixed columns and up to 16 explicit PIDs.
+  - '^iostat -xz (?:[1-9]|10) (?:[1-9]|10)$'
+  - '^vmstat(?: -d)? (?:[1-9]|10) (?:[1-9]|10)$'
+  - '^ps -eo pid,ppid,user:24,stat,wchan:32,etimes,comm$'
+  - '^ps -eo pid,ppid,user,stat,pcpu,pmem,etimes,comm --sort=-pcpu$'
+  - '^ps -p [1-9][0-9]{0,6}(?:,[1-9][0-9]{0,6}){0,15} -o pid,lstart,etime,args$'
 
   # Read fixed, non-secret operating-system and kernel accounting files.
   - '^cat /etc/os-release$'
   - '^cat /proc/sys/fs/file-nr$'
+  - '^cat /proc/(?:diskstats|pressure/io)$'
+  - '^grep PRETTY_NAME /etc/os-release$'
   - '^findmnt -n -o TARGET --target /home$'
+  - '^findmnt -n -o SOURCE,FSTYPE,TARGET --target /home$'
 
   # Inspect host systemd state. Unit selectors may include a shell brace list,
   # but commands that change unit state are never part of these rules.
@@ -49,6 +90,11 @@ allow:
   - '^systemctl show [a-zA-Z0-9][a-zA-Z0-9_.@-]* --property=[a-zA-Z][a-zA-Z0-9]*(?:,[a-zA-Z][a-zA-Z0-9]*)* --no-pager$'
   - '^systemctl cat [a-zA-Z0-9][a-zA-Z0-9_.@-]* --no-pager$'
   - '^systemctl --no-pager --type=service --state=failed$'
+  # User-service metadata, inherited through the existing strict runagent
+  # wrapper. Explicit units only; show accepts at most eight units.
+  - '^systemctl --user show [a-zA-Z0-9][a-zA-Z0-9_.@-]{0,127}(?: [a-zA-Z0-9][a-zA-Z0-9_.@-]{0,127}){0,7} --property=[a-zA-Z][a-zA-Z0-9]*(?:,[a-zA-Z][a-zA-Z0-9]*)* --no-pager$'
+  - '^systemctl --user cat [a-zA-Z0-9][a-zA-Z0-9_.@-]{0,127} --no-pager$'
+  - '^systemctl --user list-jobs --no-pager$'
   - '^systemctl list-units --all ''[a-zA-Z0-9][a-zA-Z0-9_.@-]*\*'' --no-pager$'
 
   # Read bounded host journal slices. UID selection is useful when a rootless
@@ -61,6 +107,9 @@ allow:
   # The fixed, consistently quoted format excludes file contents, arbitrary
   # paths, and additional stat options.
   - '^stat -c (?:"%n %W %w %Y %y"|''%n %W %w %Y %y'')(?: /home/[a-zA-Z0-9][a-zA-Z0-9_.-]*)+$'
+  # Pipes are format bytes only inside quotes. The unquoted shell pipeline is
+  # intentionally still ASK; classification never adds quotes for execution.
+  - '^stat -c (?:"%n\|%W\|%w\|%Y\|%y"|''%n\|%W\|%w\|%Y\|%y'')(?: /home/[a-zA-Z0-9][a-zA-Z0-9_.-]*){1,16}$'
 
   # Read one or more Asterisk configuration metadata records. The same rule is
   # inherited through strict runagent/podman-exec wrapper views.
@@ -70,9 +119,13 @@ allow:
   # container state.
   - '^podman ps(?: -a)?$'
   - '^podman ps --format ''\{\{\.Names\}\}\\t\{\{\.Status\}\}''$'
+  # Either quoting style for this exact status projection; arbitrary Go
+  # templates and additional options are still excluded.
+  - '^podman ps -a --format "\{\{\.Names\}\} \[Status:\{\{\.Status\}\}\] \[Restarts:\{\{\.Restarts\}\}\]"$'
   - '^podman logs --tail (?:[1-9][0-9]{0,2}|1000) [a-zA-Z0-9][a-zA-Z0-9_.-]*$'
   - '^podman system info --format=''\{\{\.Store\.VolumePath\}\}''$'
   - '^podman volume ls$'
+  - '^podman top [a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$'
 
   # Inspect host networking and firewalld configuration; no reload or edits.
   - '^ip (?:addr|route|link)(?: show)?$'
@@ -113,10 +166,13 @@ allow:
   # Inspect per-module containers. Log options are useful but deliberately omit
   # --follow/-f; timestamps and bounded/since/until selectors are read-only.
   - '^runagent -m [a-zA-Z0-9][a-zA-Z0-9_.-]* podman ps -a$'
-  - '^runagent -m [a-zA-Z0-9][a-zA-Z0-9_.-]* podman ps -a --format ''\{\{\.Names\}\} \[Status:\{\{\.Status\}\}\] \[Restarts:\{\{\.Restarts\}\}\]''$'
+  - '^podman ps -a --format ''\{\{\.Names\}\} \[Status:\{\{\.Status\}\}\] \[Restarts:\{\{\.Restarts\}\}\]''$'
   - '^podman ps -a --format \{\{\.Names\}\}_\{\{\.Image\}\}_\{\{\.Status\}\}$'
   # Exact metadata projections avoid exposing container environment variables.
   - '^podman inspect [a-zA-Z0-9][a-zA-Z0-9_.-]* --format ''\{\{\.Image\}\} \{\{\.Config\.Image\}\} \{\{json \.Mounts\}\}''$'
+  # Fixed runtime-state projection for up to 8 explicit containers; no raw
+  # inspect, environment, arbitrary templates, or remote connection options.
+  - '^podman inspect [a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}(?: [a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}){0,7} --format ''\{\{\.Name\}\} image=\{\{\.ImageName\}\} status=\{\{\.State\.Status\}\} pid=\{\{\.State\.Pid\}\} exit=\{\{\.State\.ExitCode\}\} started=\{\{\.State\.StartedAt\}\} finished=\{\{\.State\.FinishedAt\}\}''$'
   - '^podman image inspect [a-zA-Z0-9][a-zA-Z0-9_./:@+-]* --format ''\{\{\.Id\}\} \{\{\.Digest\}\} \{\{\.Created\}\} \{\{json \.Labels\}\}''$'
   - '^runagent -m [a-zA-Z0-9][a-zA-Z0-9_.-]* podman logs(?: --tail (?:[1-9][0-9]{0,5}|all))?(?: --since [a-zA-Z0-9][a-zA-Z0-9:TZ+_.-]*)?(?: --until [a-zA-Z0-9][a-zA-Z0-9:TZ+_.-]*)?(?: --timestamps)? [a-zA-Z0-9][a-zA-Z0-9_.-]*$'
   - '^runagent -m [a-zA-Z0-9][a-zA-Z0-9_.-]* podman system info --format=''\{\{\.Store\.VolumePath\}\}''$'
@@ -137,6 +193,7 @@ allow:
   - '^runagent -m [a-zA-Z0-9][a-zA-Z0-9_.-]* podman exec freepbx (?:cat /etc/resolv\.conf|pgrep asterisk)$'
   - '^runagent -m [a-zA-Z0-9][a-zA-Z0-9_.-]* podman exec freepbx asterisk -rx ''(?:pjsip show contacts|pjsip show transports|database show AMPUSER|database show CF|queue show|voicemail show user [a-zA-Z0-9][a-zA-Z0-9_.+-]*@[a-zA-Z0-9][a-zA-Z0-9_.-]*)''$'
   - '^mysql --version$'
+  - '^asterisk -rx (?:''dialplan show [a-zA-Z0-9*#][a-zA-Z0-9_.:@*#+-]{0,127}''|"dialplan show [a-zA-Z0-9*#][a-zA-Z0-9_.:@*#+-]{0,127}")$'
   - '^asterisk -rx (?:"(?:module show|core show|database show|pjsip show|config show help)(?: [a-zA-Z0-9][a-zA-Z0-9_.:/@*-]*)*"|''(?:module show|core show|database show|pjsip show|config show help)(?: [a-zA-Z0-9][a-zA-Z0-9_.:/@*-]*)*'')$'
 
   # Gate-managed web forwards remain target-scoped and loopback-only.
