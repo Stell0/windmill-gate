@@ -402,6 +402,36 @@ allow:
   - command: "stat -c '%n|%W|%w|%Y|%y' /home/module1 /home/module2"
     expect: ALLOW
 
+  # Operator-approved broad defaults intentionally include credential reads.
+  - command: "api-cli run module/mail1/get-configuration"
+    expect: ALLOW
+  - command: "runagent -m nethvoice9 podman exec freepbx printenv"
+    expect: ALLOW
+  - command: "printenv"
+    expect: ALLOW
+  - command: "printenv PASSWORD"
+    expect: ALLOW
+  - command: "printenv NETHVOICE_HOST API_TOKEN"
+    expect: ALLOW
+  - command: "api-cli run module/nethvoice1/get-ports-list"
+    expect: ALLOW
+  - command: "api-cli run module/nethvoice1/get-port-migration-status"
+    expect: ALLOW
+  - command: "api-cli run module/nethvoice1/get-phonebook-credentials"
+    expect: ALLOW
+  - command: "api-cli run module/other1/list-service-providers"
+    expect: ALLOW
+  - command: "firewall-cmd --info-service=nethvoice1"
+    expect: ALLOW
+  - command: "firewall-cmd --info-service=ssh"
+    expect: ALLOW
+  - command: "janus --help"
+    expect: ALLOW
+  - command: "/usr/local/bin/janus --version"
+    expect: ALLOW
+  - command: "runagent -m module1 printenv LOCAL_IP ICEIGNORE ICEENFORCE STUNSERVER STUNPORT JANUS_RTPSTART JANUS_RTPEND JANUS_SIP_RTPSTART JANUS_SIP_RTPEND JANUS_DEBUG_LEVEL ASTERISK_RTPSTART ASTERISK_RTPEND"
+    expect: ALLOW
+
 ask:
   - command: "runagent -m module1 runagent -m nested journalctl -u redis -n 100"
     expect: ASK
@@ -463,8 +493,6 @@ ask:
     expect: ASK
   - command: "api-cli run list-actions | jq ."
     expect: ASK
-  - command: "api-cli run module/mail1/get-configuration"
-    expect: ASK
   - command: "api-cli run module/mail1/configure-module --data '{}'"
     expect: ASK
   - command: "api-cli run update-module --data '{}'"
@@ -524,8 +552,6 @@ ask:
   - command: "remove-module mail1"
     expect: ASK
   - command: "runagent -m nethvoice1 podman exec freepbx getent hosts ibm.com"
-    expect: ASK
-  - command: "runagent -m nethvoice9 podman exec freepbx printenv"
     expect: ASK
   - command: "runagent -m nethvoice9 podman exec freepbx grep password /run/secrets/database"
     expect: ASK
@@ -770,12 +796,6 @@ ask:
   - command: "vmstat 1 5 | sh"
     expect: ASK
 
-  - command: "printenv"
-    expect: ASK
-  - command: "printenv PASSWORD"
-    expect: ASK
-  - command: "printenv NETHVOICE_HOST API_TOKEN"
-    expect: ASK
   - command: "date --set=2026-10-22"
     expect: ASK
   - command: "sha256sum /home/module1/.config/environment"
@@ -817,6 +837,25 @@ ask:
   - command: "timeout 12 openssl s_client -connect example.invalid:443 -servername example.invalid -verify_hostname example.invalid -verify_return_error < /dev/null 2>&1; uptime"
     expect: ASK
   - command: "stat -c %n|%W|%w|%Y|%y /home/module1"
+    expect: ASK
+
+  - command: "api-cli run module/nethvoice1/get-ports-list --data '{}'"
+    expect: ASK
+  - command: "api-cli run module/nethvoice1/set-ports-list"
+    expect: ASK
+  - command: "firewall-cmd --info-service=ssh --permanent"
+    expect: ASK
+  - command: "firewall-cmd --info-service=../ssh"
+    expect: ASK
+  - command: "janus --help --daemon"
+    expect: ASK
+  - command: "janus --debug-level=7"
+    expect: ASK
+  - command: "printenv --null"
+    expect: ASK
+  - command: "printenv 9INVALID"
+    expect: ASK
+  - command: "printenv API_TOKEN > /tmp/secret"
     expect: ASK
 
 deny:

@@ -6,11 +6,13 @@ Gate lets an AI agent inspect a production system without giving up human
 control.
 
 The operator starts Gate and selects a remote target. The agent then submits
-one command at a time. Gate allows known safe diagnostics, asks the operator
-about unknown commands, blocks dangerous commands, and records every decision.
+one command at a time. Gate applies its configured allow and deny rules, asks
+the operator about unmatched commands, and records every decision.
 
 Gate uses your existing Bastion, Sancho, and Windmill connection. It does not
-give the agent production credentials or an unrestricted remote shell.
+give the agent transport credentials or an unrestricted remote shell. The
+bundled policy permits environment and module-action reads that can return
+production credentials; see the policy reference below.
 
 ## Quick start
 
@@ -223,12 +225,29 @@ arbitrary targets, or silently make temporary approvals permanent.
 
 ### Policy
 
-The bundled policy automatically allows narrow diagnostics, including explicitly
-bounded packet captures that write to Gate-named files under `/tmp`.
+The bundled policy combines bounded diagnostics with operator-approved broad
+module-action and environment access. It also permits explicitly bounded packet
+captures that write to Gate-named files under `/tmp`.
 Anchored expressions and semantic validators constrain arguments, quoting,
 shell composition, and supported NS8 wrappers. Unmatched or malformed commands
 remain `ASK` unless a deny rule matches. Classification never rewrites the
 approved command.
+
+Module actions named `get-*` or `list-*` are allowed without additional arguments
+for any module identifier of 1–128 characters. The action suffix accepts 1–64
+lowercase letters or hyphens. This is an explicit expansion of the earlier narrow,
+read-only default: action names do not prove safety. For example, NethVoice
+`get-phonebook-credentials` can change a database account and return a password,
+and `get-configuration` can return an OIDC client secret.
+
+Bare `printenv` is allowed and returns the complete environment. Alternatively,
+it accepts 1–15 variable names, each at most 64 characters, including credential
+names. The same rules inherit through the existing strict `runagent` and
+container wrapper views. Gate does not redact these environment/action secrets;
+agents must still follow applicable sensitive-data handling instructions.
+`firewall-cmd --info-service=NAME` accepts one bounded service name, and Janus
+accepts only `--help` or `--version`, with an optional `/usr/local/bin/` path.
+Other arguments, shell composition and unmatched commands retain approval checks.
 
 Journal reads scoped to one UID, syslog tag or user unit support optional UTC time
 bounds, 1–1000 lines and mandatory `--no-pager`. Filters accept bounded IDs, task
@@ -248,12 +267,12 @@ Process inspection uses fixed diagnostic column lists and at most 16 explicit
 PIDs. These rules also inherit through the existing strict wrapper views.
 
 Additional rules cover the exact ISO date and mount-source queries, module script
-checksums, named diagnostic environment variables, container process lists and
-quoted Asterisk dialplan selectors. `sed -n START,ENDp FILE` accepts at most 1000
+checksums, environment inspection, container process lists and quoted Asterisk
+dialplan selectors. `sed -n START,ENDp FILE` accepts at most 1000
 lines from known diagnostic source/configuration or log files, with optional
 quotes around the range. Grep supports the observed Kamailio, RTPengine, Asterisk
 and application source paths. Arbitrary files, shell globs, sed programs and
-password/token environment variables still require approval.
+unsupported command forms still require approval.
 
 Live SIP captures require `timeout` of 1–180 seconds, a fixed `any` interface,
 ports 5060/5061/20030, and a `/tmp/gate-NAME.pcap` output path. Capture replay

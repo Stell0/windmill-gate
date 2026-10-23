@@ -30,6 +30,29 @@ include Gate's canonical `skills/` content and `.agents/skills` discovery
 entries. The installer retrieves the external NethServer admin skill from
 `NethServer/agents`; it is not vendored or silently persisted into Gate policy.
 
+## Operator-approved default policy expansion (23 October 2026)
+
+The operator explicitly approved broad module `get-*`/`list-*` actions without
+payload arguments, complete or named environment reads with `printenv`, named
+firewalld service inspection, and Janus help/version. Module/service selectors,
+action suffixes and environment names remain syntactically bounded. Existing
+DENY precedence, shell parsing, target control and immutable command bytes remain
+unchanged; unmatched command families still ASK.
+
+This deliberately expands the narrow/read-only policy guidance in `AGENTS.md`:
+matched module getters can mutate state or expose credentials, and `printenv`
+can disclose the complete environment. It is a manually requested and reviewed
+policy change, not automatic approval-history learning. The operator also
+explicitly requested a main-branch push and local-default installation; that
+instruction is the exception to the proposal-only publication/deployment path
+for this change. Automatic policy-review proposals retain their existing safety,
+evidence and human merge/deployment restrictions.
+
+Fresh installations receive these defaults through the embedded policy. Existing
+policy files are not overwritten by installers or daemon startup. The separately
+authorized local installation backs up the existing file; a running Gate process
+must restart to load the new policy. No production target or service is restarted.
+
 ## Optional memory and mandatory session review
 
 WG0 prerequisite verified on 19 October 2026: C0 AM6 and final deployment gate

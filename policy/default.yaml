@@ -1,6 +1,8 @@
-# Gate's persistent policy is deliberately narrow. DENY rules take precedence;
-# anything unmatched or shell-composed is ASK, except the exact bounded TLS
-# probe with /dev/null input and a fixed stderr merge described below.
+# Gate's persistent policy includes operator-approved broad module-action and
+# environment reads: matching actions may mutate state and output may contain
+# secrets. DENY rules take precedence. Unmatched or shell-composed commands are
+# ASK, except the exact bounded TLS probe with /dev/null input and a fixed stderr
+# merge described below.
 #
 # NethServer rules below originate from NethServer/agents commit
 # 7d8690e07002b19f99fd92155100b772281282bb and operator-reviewed diagnostics.
@@ -63,9 +65,10 @@ allow:
   - '^hostname$'
   - '^nproc$'
   - '^date --iso-8601=seconds$'
-  # Only named diagnostic variables, never the complete environment or
-  # arbitrary password/token variables. Existing strict wrappers inherit it.
-  - '^printenv (?:NETHVOICE_HOST|NETHVOICE_TANCREDI_IMAGE|NETHVOICE_REPORTS_UI_IMAGE|AGENT_INSTALL_DIR|AGENT_STATE_DIR|SATELLITE_VOICEMAIL_TRANSCRIPTION_ENABLED)(?: (?:NETHVOICE_HOST|NETHVOICE_TANCREDI_IMAGE|NETHVOICE_REPORTS_UI_IMAGE|AGENT_INSTALL_DIR|AGENT_STATE_DIR|SATELLITE_VOICEMAIL_TRANSCRIPTION_ENABLED)){0,7}$'
+  # Operator-approved environment access, including passwords/tokens: no args
+  # dumps all variables; otherwise accept 1-15 names of at most 64 characters.
+  # Options and shell expansion remain ASK. Strict wrapper views inherit it.
+  - '^printenv(?: [a-zA-Z_][a-zA-Z0-9_]{0,63}){0,15}$'
   - '^id(?: -u [a-zA-Z0-9][a-zA-Z0-9_.-]*)?$'
 
   # Finite performance samples: 1-10 seconds apart, 1-10 reports. Process
@@ -130,13 +133,16 @@ allow:
   # Inspect host networking and firewalld configuration; no reload or edits.
   - '^ip (?:addr|route|link)(?: show)?$'
   - '^firewall-cmd --(?:get-active-zones|list-all-zones)$'
+  - '^firewall-cmd --info-service=[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$'
   - '^logcli labels(?: [a-zA-Z_][a-zA-Z0-9_]*)? -q$'
 
-  # Read cluster and module status through documented API actions. Configuration
-  # and write actions intentionally remain subject to operator review.
+  # Cluster actions stay explicit. Operator-approved module get-/list- actions
+  # accept no extra arguments. These names do NOT prove read-only behavior:
+  # get-configuration may return secrets; get-phonebook-credentials may write.
+  # Other action names and payload arguments remain ASK.
   - '^api-cli --help$'
   - '^api-cli run (?:list-actions|get-cluster-status|list-installed-modules)$'
-  - '^api-cli run module/[a-zA-Z0-9][a-zA-Z0-9_.-]*/(?:list-actions|get-status)$'
+  - '^api-cli run module/[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}/(?:get|list)-[a-z][a-z-]{0,63}$'
   - '^api-cli run list-routes --agent module/[a-zA-Z0-9][a-zA-Z0-9_.-]*(?: --data ''\{"expand_list":true\}'')?$'
   - '^api-cli run get-route --agent module/[a-zA-Z0-9][a-zA-Z0-9_.-]* --data ''\{"instance":"[a-zA-Z0-9][a-zA-Z0-9_.-]*"\}''$'
   - '^api-cli run list-certificates --agent module/[a-zA-Z0-9][a-zA-Z0-9_.-]*$'
@@ -193,6 +199,8 @@ allow:
   - '^runagent -m [a-zA-Z0-9][a-zA-Z0-9_.-]* podman exec freepbx (?:cat /etc/resolv\.conf|pgrep asterisk)$'
   - '^runagent -m [a-zA-Z0-9][a-zA-Z0-9_.-]* podman exec freepbx asterisk -rx ''(?:pjsip show contacts|pjsip show transports|database show AMPUSER|database show CF|queue show|voicemail show user [a-zA-Z0-9][a-zA-Z0-9_.+-]*@[a-zA-Z0-9][a-zA-Z0-9_.-]*)''$'
   - '^mysql --version$'
+  # Fixed Janus informational flags; starting/reconfiguring it remains ASK.
+  - '^(?:/usr/local/bin/)?janus --(?:help|version)$'
   - '^asterisk -rx (?:''dialplan show [a-zA-Z0-9*#][a-zA-Z0-9_.:@*#+-]{0,127}''|"dialplan show [a-zA-Z0-9*#][a-zA-Z0-9_.:@*#+-]{0,127}")$'
   - '^asterisk -rx (?:"(?:module show|core show|database show|pjsip show|config show help)(?: [a-zA-Z0-9][a-zA-Z0-9_.:/@*-]*)*"|''(?:module show|core show|database show|pjsip show|config show help)(?: [a-zA-Z0-9][a-zA-Z0-9_.:/@*-]*)*'')$'
 
