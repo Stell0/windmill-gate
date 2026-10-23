@@ -1,4 +1,4 @@
-//go:build !linux && !windows
+//go:build !linux && !windows && !darwin
 
 package tui
 
@@ -11,3 +11,5 @@ func configureCharacterInput(io.Reader) (func(), bool, error) {
 func writerIsTerminal(io.Writer) bool {
 	return false
 }
+
+func writerSupportsBell(io.Writer) bool { return false }

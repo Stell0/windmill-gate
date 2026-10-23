@@ -235,7 +235,7 @@ func TestSingleKeyDecisionDoesNotRequireNewline(t *testing.T) {
 	input, commands := io.Pipe()
 	defer input.Close()
 	defer commands.Close()
-	lines := make(chan string, 2)
+	lines := make(chan operatorInput, 2)
 	readErrors := make(chan error, 1)
 	var pendingCount atomic.Int64
 	pendingCount.Store(1)
@@ -246,8 +246,8 @@ func TestSingleKeyDecisionDoesNotRequireNewline(t *testing.T) {
 	}
 	select {
 	case line := <-lines:
-		if line != "y" {
-			t.Fatalf("single-key line = %q, want y", line)
+		if !line.submitted || line.line != "y" {
+			t.Fatalf("single-key input = %+v, want y", line)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("single-key decision waited for a newline")
@@ -258,13 +258,8 @@ func TestSingleKeyDecisionDoesNotRequireNewline(t *testing.T) {
 	if _, err := io.WriteString(commands, "\nq\n"); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case line := <-lines:
-		if line != "q" {
-			t.Fatalf("line after legacy Enter = %q, want q", line)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("next operator command was not read")
+	if line := nextOperatorLine(t, lines); line != "q" {
+		t.Fatalf("line after legacy Enter = %q, want q", line)
 	}
 }
 
@@ -276,7 +271,7 @@ func TestAllDecisionKeysWorkInSingleKeyMode(t *testing.T) {
 			input, commands := io.Pipe()
 			defer input.Close()
 			defer commands.Close()
-			lines := make(chan string, 1)
+			lines := make(chan operatorInput, 1)
 			readErrors := make(chan error, 1)
 			var pendingCount atomic.Int64
 			pendingCount.Store(1)
@@ -286,8 +281,8 @@ func TestAllDecisionKeysWorkInSingleKeyMode(t *testing.T) {
 			}
 			select {
 			case line := <-lines:
-				if line != key {
-					t.Fatalf("single-key line = %q, want %q", line, key)
+				if !line.submitted || line.line != key {
+					t.Fatalf("single-key input = %+v, want %q", line, key)
 				}
 			case <-time.After(time.Second):
 				t.Fatal("single-key decision waited for a newline")
@@ -434,23 +429,40 @@ func TestTerminalAttentionAndClearSequences(t *testing.T) {
 
 func TestApprovalBellOnlyForNewPendingRequests(t *testing.T) {
 	for _, terminal := range []bool{true, false} {
-		var output bytes.Buffer
-		app := App{Output: &output, terminalOutput: terminal}
-		first := approval.Pending{Command: command.Snapshot{ID: "cmd_first"}}
-		second := approval.Pending{Command: command.Snapshot{ID: "cmd_second"}}
-		app.notifyPending(nil)
-		app.notifyPending([]approval.Pending{first}) // startup or arrival
-		app.notifyPending([]approval.Pending{first}) // repeated wakeup/redraw
-		app.notifyPending([]approval.Pending{first, second})
-		app.notifyPending([]approval.Pending{second}) // decision/cancellation
-		app.notifyPending(nil)
-		want := ""
-		if terminal {
-			want = "\a\a"
+		for _, bells := range []bool{true, false} {
+			var output bytes.Buffer
+			sounds := 0
+			app := App{Output: &output, terminalOutput: terminal, bellOutput: bells, audioBell: func() { sounds++ }}
+			first := approval.Pending{Command: command.Snapshot{ID: "cmd_first"}}
+			second := approval.Pending{Command: command.Snapshot{ID: "cmd_second"}}
+			app.notifyPending(nil)
+			app.notifyPending([]approval.Pending{first}) // startup or arrival
+			app.notifyPending([]approval.Pending{first}) // repeated wakeup/redraw
+			app.notifyPending([]approval.Pending{first, second})
+			app.notifyPending([]approval.Pending{second}) // decision/cancellation
+			app.notifyPending(nil)
+			want := ""
+			wantSounds := 0
+			if bells {
+				want = "\a\a"
+				wantSounds = 2
+			}
+			if got := output.String(); got != want || sounds != wantSounds {
+				t.Fatalf("ANSI=%v bells=%v: bell output=%q sounds=%d, want %q/%d", terminal, bells, got, sounds, want, wantSounds)
+			}
 		}
-		if got := output.String(); got != want {
-			t.Fatalf("terminal=%v: bell output = %q, want %q", terminal, got, want)
-		}
+	}
+}
+
+func TestBellCommand(t *testing.T) {
+	var output bytes.Buffer
+	sounds := 0
+	app := App{Output: &output, bellOutput: true, audioBell: func() { sounds++ }}
+	if quit, err := app.handle(context.Background(), "bell"); quit || err != nil {
+		t.Fatalf("bell: quit=%v err=%v", quit, err)
+	}
+	if output.String() != "\a" || sounds != 1 {
+		t.Fatalf("bell: output=%q sounds=%d", output.String(), sounds)
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"unicode"
 
 	"github.com/stell0/windmill-gate/internal/approval"
 	"github.com/stell0/windmill-gate/internal/backend"
@@ -27,6 +28,8 @@ type App struct {
 	discovered      []backend.Target
 	singleKeyInput  bool
 	terminalOutput  bool
+	bellOutput      bool
+	audioBell       func()
 	ledger          []storage.AuthorizationEntry
 	ledgerSeen      map[string]bool
 	notifiedPending map[string]bool
@@ -54,11 +57,17 @@ func (a *App) Run(ctx context.Context) error {
 	}
 	a.singleKeyInput = singleKeyInput
 	a.terminalOutput = writerIsTerminal(a.Output)
+	a.bellOutput = writerSupportsBell(a.Output)
+	if a.bellOutput {
+		bellCtx, cancelBell := context.WithCancel(ctx)
+		defer cancelBell()
+		a.audioBell = startAudioBell(bellCtx, playSystemBell)
+	}
 	if a.terminalOutput {
 		defer a.setTerminalTitle(false)
 	}
 
-	lines := make(chan string)
+	lines := make(chan operatorInput)
 	scanErrors := make(chan error, 1)
 	var pendingCount atomic.Int64
 	go readOperatorLines(ctx, a.Input, a.singleKeyInput, &pendingCount, lines, scanErrors)
@@ -123,9 +132,15 @@ func (a *App) Run(ctx context.Context) error {
 				a.renderAuthorizationItems(added)
 			}
 			promptVisible = false
-		case line := <-lines:
+		case input := <-lines:
+			// Echo in this loop so keyboard editing and asynchronous approval
+			// messages never write to the terminal from different goroutines.
+			fmt.Fprint(a.Output, input.echo)
+			if !input.submitted {
+				continue
+			}
 			promptVisible = false
-			line = strings.TrimSpace(line)
+			line := strings.TrimSpace(input.line)
 			decisionInput := isDecisionInput(line)
 			quit, err := a.handle(ctx, line)
 			if err != nil {
@@ -158,22 +173,29 @@ func (a *App) Run(ctx context.Context) error {
 	}
 }
 
-func readOperatorLines(ctx context.Context, input io.Reader, singleKey bool, pendingCount *atomic.Int64, lines chan<- string, readErrors chan<- error) {
+type operatorInput struct {
+	line      string
+	echo      string
+	submitted bool
+}
+
+func readOperatorLines(ctx context.Context, input io.Reader, singleKey bool, pendingCount *atomic.Int64, lines chan<- operatorInput, readErrors chan<- error) {
 	reader := bufio.NewReader(input)
-	var current []byte
+	var current []rune
+	var escape rune
 	swallowLineEnd := false
-	send := func(line string) bool {
+	send := func(update operatorInput) bool {
 		select {
-		case lines <- line:
+		case lines <- update:
 			return true
 		case <-ctx.Done():
 			return false
 		}
 	}
 	for {
-		value, err := reader.ReadByte()
+		value, _, err := reader.ReadRune()
 		if err != nil {
-			if errors.Is(err, io.EOF) && len(current) > 0 && !send(string(current)) {
+			if errors.Is(err, io.EOF) && len(current) > 0 && !send(operatorInput{line: string(current), submitted: true}) {
 				return
 			}
 			select {
@@ -188,6 +210,33 @@ func readOperatorLines(ctx context.Context, input io.Reader, singleKey bool, pen
 			return
 		}
 
+		if value == '\x1b' {
+			escape = value
+			continue
+		}
+		// Consume complete CSI/SS3 key sequences, including modifiers. Their
+		// final bytes must never become command text or single-key decisions.
+		if escape != 0 {
+			switch escape {
+			case '\x1b':
+				if value == '[' || value == 'O' {
+					escape = value
+				} else {
+					escape = 0 // ignore Alt-key combinations too
+				}
+			default:
+				if escape == '[' && value == '[' {
+					escape = 'O' // Linux console F1-F5: ESC [ [ A-E
+				} else if value >= 0x40 && value <= 0x7e {
+					escape = 0
+				}
+			}
+			continue
+		}
+		if value == '\t' {
+			value = ' '
+		}
+
 		if swallowLineEnd {
 			if value == '\n' {
 				swallowLineEnd = false
@@ -199,7 +248,7 @@ func readOperatorLines(ctx context.Context, input io.Reader, singleKey bool, pen
 			swallowLineEnd = false
 		}
 		if singleKey && pendingCount.Load() == 1 && len(current) == 0 && (value == 'y' || value == 's' || value == 'n') {
-			if !send(string(value)) {
+			if !send(operatorInput{line: string(value), echo: string(value) + "\n", submitted: true}) {
 				return
 			}
 			swallowLineEnd = true
@@ -207,23 +256,39 @@ func readOperatorLines(ctx context.Context, input io.Reader, singleKey bool, pen
 		}
 		switch value {
 		case '\r', '\n':
-			if !send(string(current)) {
+			echo := ""
+			if singleKey {
+				echo = "\n"
+			}
+			if !send(operatorInput{line: string(current), echo: echo, submitted: true}) {
 				return
 			}
 			current = current[:0]
+			if value == '\r' {
+				swallowLineEnd = true
+			}
 		case '\b', 0x7f:
 			if len(current) > 0 {
 				current = current[:len(current)-1]
+				if singleKey && !send(operatorInput{echo: "\b \b"}) {
+					return
+				}
 			}
 		default:
+			if !unicode.IsPrint(value) {
+				continue
+			}
 			current = append(current, value)
+			if singleKey && !send(operatorInput{echo: string(value)}) {
+				return
+			}
 		}
 	}
 }
 
 func (a *App) printBanner() {
 	fmt.Fprintln(a.Output, "Gate operator console")
-	fmt.Fprintln(a.Output, "Commands: targets, discover, target-add NUMBER, attach AGENT TARGET, agents, approvals, rules, forwards, hosts, y|s|n [COMMAND], history, cancel COMMAND, detach TARGET, quit")
+	fmt.Fprintln(a.Output, "Commands: targets, discover, target-add NUMBER, attach AGENT TARGET, agents, approvals, rules, forwards, hosts, y|s|n [COMMAND], history, cancel COMMAND, detach TARGET, bell, quit")
 }
 
 func (a *App) renderTargets() {
@@ -288,11 +353,23 @@ func (a *App) notifyPending(pending []approval.Pending) {
 	next := make(map[string]bool, len(pending))
 	for _, item := range pending {
 		next[item.Command.ID] = true
-		if a.terminalOutput && !a.notifiedPending[item.Command.ID] {
-			fmt.Fprint(a.Output, "\a")
+		if !a.notifiedPending[item.Command.ID] {
+			a.ringBell()
 		}
 	}
 	a.notifiedPending = next
+}
+
+func (a *App) ringBell() {
+	if !a.bellOutput {
+		return
+	}
+	// Keep BEL for terminals reached over SSH and as a fallback when local
+	// audio is unavailable. System audio also works when terminal bells are muted.
+	fmt.Fprint(a.Output, "\a")
+	if a.audioBell != nil {
+		a.audioBell()
+	}
 }
 
 func (a *App) setTerminalTitle(waiting bool) {
@@ -328,6 +405,8 @@ func (a *App) handle(ctx context.Context, line string) (bool, error) {
 		return false, nil
 	}
 	switch fields[0] {
+	case "bell":
+		a.ringBell()
 	case "quit", "q":
 		return true, nil
 	case "targets":

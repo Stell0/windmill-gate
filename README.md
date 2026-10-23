@@ -63,8 +63,8 @@ session ID:
 ```
 
 When one approval is pending, the Windows operator console accepts a single-key
-decision without Enter. Keyboard echo is disabled while the console is active;
-Gate restores the previous console input settings when it exits.
+decision without Enter. Automatic console echo is disabled while Gate handles
+typed input; Gate restores the previous console input settings when it exits.
 
 Leave this terminal open. Then open a second PowerShell window, enter the Gate
 installation directory, and start Codex:
@@ -98,9 +98,21 @@ Windows:
 .\gate-sh.exe --agent codex-1 -c "uname -a"
 ```
 
-Gate sends a terminal bell (BEL) for each newly waiting approval, including
-requests already pending when the console opens. Enable audible bells in your
-terminal settings to hear it; redraws do not ring again.
+Gate sounds an alert for each newly waiting approval, including requests already
+pending when the console opens. Redraws do not ring again. Type `bell` in the Gate
+operator console to test the sound.
+
+For local consoles, Gate plays the Windows system Exclamation sound, the macOS
+Ping sound, or the Linux desktop bell using `canberra-gtk-play` (with `paplay`
+and the freedesktop bell sound as a fallback). Playback runs in the background
+and never blocks approval keys; bursts of requests share a sound instead of
+starting overlapping players. Linux needs one of those players installed.
+System volume and sound settings still apply.
+
+Gate also sends a terminal bell (BEL), including on Windows consoles without
+ANSI support and on macOS. If Gate runs over SSH, only BEL is sent to your
+terminal; enable audible bells in that terminal's settings. Redirected output
+does not trigger sounds or contain bell characters.
 
 When a command needs a decision, use the Gate operator terminal:
 
@@ -109,6 +121,11 @@ y   approve this command once
 s   approve similar commands for this target until it disconnects
 n   block this command
 ```
+
+In character-mode consoles (Linux, macOS and Windows), Backspace edits the
+current input and typed characters are echoed by Gate. Arrow and function keys
+are ignored; the console does not provide command history or cursor navigation.
+Gate restores the previous terminal input settings when it exits.
 
 Gate is now ready for agent-assisted diagnostics.
 

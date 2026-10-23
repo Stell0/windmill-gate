@@ -26,7 +26,9 @@ func configureCharacterInput(input io.Reader) (func(), bool, error) {
 		return nil, false, err
 	}
 	characterMode := *original
-	characterMode.Lflag &^= unix.ICANON
+	// Gate handles echo and editing itself in character mode. Kernel echo
+	// would display Backspace and escape sequences as ^? and ^[[C.
+	characterMode.Lflag &^= unix.ICANON | unix.ECHO | unix.ECHONL
 	characterMode.Cc[unix.VMIN] = 1
 	characterMode.Cc[unix.VTIME] = 0
 	if err := unix.IoctlSetTermios(fd, unix.TCSETS, &characterMode); err != nil {
@@ -45,3 +47,5 @@ func writerIsTerminal(output io.Writer) bool {
 	_, err := unix.IoctlGetTermios(int(descriptor.Fd()), unix.TCGETS)
 	return err == nil
 }
+
+func writerSupportsBell(output io.Writer) bool { return writerIsTerminal(output) }

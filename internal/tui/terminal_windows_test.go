@@ -99,3 +99,31 @@ func TestConfigureCharacterInputNonConsole(t *testing.T) {
 		}
 	}
 }
+
+func TestConsoleBellDoesNotRequireVirtualTerminalMode(t *testing.T) {
+	output, err := os.OpenFile("CONOUT$", os.O_RDWR, 0)
+	if err != nil {
+		kernel32 := windows.NewLazySystemDLL("kernel32.dll")
+		if ok, _, err := kernel32.NewProc("AllocConsole").Call(); ok == 0 {
+			t.Fatalf("allocate test console: %v", err)
+		}
+		t.Cleanup(func() { kernel32.NewProc("FreeConsole").Call() })
+		output, err = os.OpenFile("CONOUT$", os.O_RDWR, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() { output.Close() })
+	handle := windows.Handle(output.Fd())
+	var original uint32
+	if err := windows.GetConsoleMode(handle, &original); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { windows.SetConsoleMode(handle, original) })
+	if err := windows.SetConsoleMode(handle, original&^windows.ENABLE_VIRTUAL_TERMINAL_PROCESSING); err != nil {
+		t.Fatal(err)
+	}
+	if writerIsTerminal(output) || !writerSupportsBell(output) {
+		t.Fatal("console without ANSI support must still support audible alerts")
+	}
+}

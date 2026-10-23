@@ -39,3 +39,13 @@ func writerIsTerminal(output io.Writer) bool {
 	var mode uint32
 	return windows.GetConsoleMode(windows.Handle(descriptor.Fd()), &mode) == nil && mode&windows.ENABLE_VIRTUAL_TERMINAL_PROCESSING != 0
 }
+
+// Audible alerts do not require ANSI/virtual-terminal output support.
+func writerSupportsBell(output io.Writer) bool {
+	descriptor, ok := output.(windowsFileDescriptor)
+	if !ok {
+		return false
+	}
+	var mode uint32
+	return windows.GetConsoleMode(windows.Handle(descriptor.Fd()), &mode) == nil
+}
