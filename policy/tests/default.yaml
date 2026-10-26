@@ -1,4 +1,12 @@
 allow:
+  - command: "cat /etc/nethserver-release"
+    expect: ALLOW
+  - command: "date -Is"
+    expect: ALLOW
+  - command: "httpd -t"
+    expect: ALLOW
+  - command: "systemctl is-active httpd httpd-fpbx rh-php73-php-fpm rh-php56-php-fpm asterisk"
+    expect: ALLOW
   - command: "podman ps -a --format '{{.Names}} [Status:{{.Status}}] [Restarts:{{.Restarts}}]'"
     expect: ALLOW
   - command: "uname -a"
@@ -433,6 +441,34 @@ allow:
     expect: ALLOW
 
 ask:
+  - command: "cat /etc/nethserver-release /etc/shadow"
+    expect: ASK
+  - command: "cat /etc/nethserver-release; uptime"
+    expect: ASK
+  - command: "date -Is -s 2026-01-01"
+    expect: ASK
+  - command: "date -Is > /tmp/output"
+    expect: ASK
+  - command: "httpd -t -f /tmp/config"
+    expect: ASK
+  - command: "httpd -k start"
+    expect: ASK
+  - command: "httpd -t $(uptime)"
+    expect: ASK
+  - command: "systemctl is-active"
+    expect: ASK
+  - command: "systemctl is-active --all"
+    expect: ASK
+  - command: "systemctl is-active httpd --quiet"
+    expect: ASK
+  - command: "systemctl is-active /etc/httpd"
+    expect: ASK
+  - command: "systemctl is-active a b c d e f g h i"
+    expect: ASK
+  - command: "systemctl is-active httpd && uptime"
+    expect: ASK
+  - command: "systemctl is-active httpd; systemctl restart httpd"
+    expect: ASK
   - command: "runagent -m module1 runagent -m nested journalctl -u redis -n 100"
     expect: ASK
   - command: "podman logs --tail 1001 redis"
@@ -859,6 +895,8 @@ ask:
     expect: ASK
 
 deny:
+  - command: "systemctl restart httpd"
+    expect: DENY
   - command: "uptime; reboot"
     expect: DENY
   - command: "rm /tmp/file"

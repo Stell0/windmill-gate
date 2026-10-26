@@ -283,6 +283,13 @@ and `vmstat` (optionally `-d`) with both an interval and report count of 1–10.
 Process inspection uses fixed diagnostic column lists and at most 16 explicit
 PIDs. These rules also inherit through the existing strict wrapper views.
 
+NethServer 7 diagnostics additionally allow the exact `cat /etc/nethserver-release`,
+`date -Is` and `httpd -t` commands. `systemctl is-active` accepts 1–8 explicit
+unit names, each 1–128 characters and starting with an alphanumeric character;
+remaining characters may be alphanumeric, `_`, `.`, `@` or `-`. Extra flags,
+custom Apache configuration paths and shell composition still require approval.
+These rules inherit through the existing strict wrapper views.
+
 Additional rules cover the exact ISO date and mount-source queries, module script
 checksums, environment inspection, container process lists and quoted Asterisk
 dialplan selectors. `sed -n START,ENDp FILE` accepts at most 1000

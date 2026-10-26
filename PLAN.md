@@ -53,6 +53,24 @@ policy files are not overwritten by installers or daemon startup. The separately
 authorized local installation backs up the existing file; a running Gate process
 must restart to load the new policy. No production target or service is restarted.
 
+## Operator-approved NS7 diagnostic rules (26 October 2026)
+
+The operator explicitly reviewed and approved four diagnostic additions:
+`cat /etc/nethserver-release`, `date -Is`, `httpd -t` and `systemctl is-active`
+with 1–8 explicit unit names of 1–128 characters. Each observed command has one
+successful manual approval in one target context; this does not meet automatic
+proposal thresholds. This is a manually reviewed policy change, with explicit
+authorization to commit, push, rebuild distributions and update the local policy,
+rather than an automatically generated proposal. That authorization is the
+exception to the proposal-only publication/deployment path in `AGENTS.md` and the
+policy-review skill for this change. Automatic review thresholds remain unchanged.
+
+Only these four bounded read-only forms change from ASK to ALLOW, including
+their existing strict wrapper inheritance. DENY precedence, unknown-command ASK
+and command-byte integrity are unchanged. The local update preserves other rules
+and creates a backup. A running Gate process must restart to load the updated
+policy; no production services are restarted.
+
 ## Optional memory and mandatory session review
 
 WG0 prerequisite verified on 19 October 2026: C0 AM6 and final deployment gate

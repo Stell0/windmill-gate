@@ -65,6 +65,9 @@ allow:
   - '^hostname$'
   - '^nproc$'
   - '^date --iso-8601=seconds$'
+  - '^date -Is$'
+  # Exact Apache configuration validation; custom files and control flags ASK.
+  - '^httpd -t$'
   # Operator-approved environment access, including passwords/tokens: no args
   # dumps all variables; otherwise accept 1-15 names of at most 64 characters.
   # Options and shell expansion remain ASK. Strict wrapper views inherit it.
@@ -81,6 +84,7 @@ allow:
 
   # Read fixed, non-secret operating-system and kernel accounting files.
   - '^cat /etc/os-release$'
+  - '^cat /etc/nethserver-release$'
   - '^cat /proc/sys/fs/file-nr$'
   - '^cat /proc/(?:diskstats|pressure/io)$'
   - '^grep PRETTY_NAME /etc/os-release$'
@@ -90,6 +94,7 @@ allow:
   # Inspect host systemd state. Unit selectors may include a shell brace list,
   # but commands that change unit state are never part of these rules.
   - '^systemctl status [a-zA-Z0-9][a-zA-Z0-9_.@{},-]*(?: --no-pager)?$'
+  - '^systemctl is-active [a-zA-Z0-9][a-zA-Z0-9_.@-]{0,127}(?: [a-zA-Z0-9][a-zA-Z0-9_.@-]{0,127}){0,7}$'
   - '^systemctl show [a-zA-Z0-9][a-zA-Z0-9_.@-]* --property=[a-zA-Z][a-zA-Z0-9]*(?:,[a-zA-Z][a-zA-Z0-9]*)* --no-pager$'
   - '^systemctl cat [a-zA-Z0-9][a-zA-Z0-9_.@-]* --no-pager$'
   - '^systemctl --no-pager --type=service --state=failed$'
