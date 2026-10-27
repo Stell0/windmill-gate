@@ -1,6 +1,8 @@
 # Gate's persistent policy includes operator-approved broad module-action and
-# environment reads: matching actions may mutate state and output may contain
-# secrets. DENY rules take precedence. Unmatched or shell-composed commands are
+# environment, file and startup-argument reads, plus all journalctl commands.
+# Matching actions and journal commands may mutate state; output may contain
+# secrets. DENY rules take precedence.
+# Unmatched or shell-composed commands are
 # ASK, except the exact bounded TLS probe with /dev/null input and a fixed stderr
 # merge described below.
 #
@@ -11,13 +13,13 @@
 validated_allow:
   # These families need argument-level checks that a regular expression alone
   # cannot express. Validators inspect but never rewrite the approved payload.
-  # Permit only a quoted, forward, at-most-1000-line print range from the
-  # observed non-secret endpoint file. Other sed programs and paths remain ASK.
+  # Legacy endpoint-specific grammar; the general print-only file rule below
+  # also permits other explicit paths under the operator-approved read policy.
   - regexp: '^sed -n (?:"[0-9]+,[0-9]+p"|''[0-9]+,[0-9]+p'') /etc/asterisk/pjsip\.endpoint\.conf$'
     validator: asterisk_config_slice
   - regexp: '^(?:ls|cat|tail|grep|egrep|pgrep)(?: .*)?$'
     validator: diagnostic_read
-  # Print-only ranges of 1-1000 lines from diagnostic source/log files. Never
+  # Print-only ascending numeric ranges from any explicit file. Never
   # execute arbitrary sed programs, glob paths, or admit in-place edits.
   - regexp: '^sed -n (?:[0-9]+,[0-9]+p|''[0-9]+,[0-9]+p''|"[0-9]+,[0-9]+p") [^ ]+$'
     validator: diagnostic_slice
@@ -33,8 +35,8 @@ validated_allow:
   # Require EOF on stdin, certificate verification and one matching host.
   - regexp: '^timeout [0-9]+ openssl s_client -connect [a-zA-Z0-9.-]+:(?:443|5061) -servername [a-zA-Z0-9.-]+ -verify_hostname [a-zA-Z0-9.-]+ -verify_return_error < /dev/null 2>&1$'
     validator: tls_probe
-  # Container grep accepts multiple files only inside application, Asterisk,
-  # and log trees, rather than exposing arbitrary paths or secret mounts.
+  # Legacy source-specific grep grammars remain for compatibility. The general
+  # diagnostic_read rule above now permits arbitrary explicit file operands.
   - regexp: '^runagent -m [a-zA-Z0-9][a-zA-Z0-9_.-]* podman exec [a-zA-Z0-9][a-zA-Z0-9_.-]* grep(?: .*)?$'
     validator: container_grep
   # The MariaDB image obtains its password through this fixed shell wrapper.
@@ -46,15 +48,24 @@ validated_allow:
   # Reviewed journal reads: one UID, syslog tag or user unit, optional UTC time
   # bounds, mandatory no-pager and 1-1000 lines. Filters admit bounded IDs,
   # simple alternatives and three exact reviewed service-error expressions.
-  # Unknown/repeated options and general PCRE programs remain ASK.
+  # This legacy scoped grammar remains available for existing custom policies;
+  # the operator-authorized standalone journal rule below permits all arguments.
   - regexp: '^journalctl (?:_UID=[0-9]{1,10}|-t [a-zA-Z0-9][a-zA-Z0-9_.@-]{0,127}|--user -u [a-zA-Z0-9][a-zA-Z0-9_.@-]{0,127}) .+$'
     validator: scoped_journal
+  # Operator-authorized arbitrary quoted templates over container listing data.
+  - regexp: '^podman ps -a --format .+$'
+    validator: container_ps
+  - regexp: '^podman(?: container)? inspect .+$'
+    validator: container_startup
   # Keep RTPengine access on the exact proxy/container boundary. The validator
   # admits help and one bounded Call-ID lookup, never aggregate or control verbs.
   - regexp: '^runagent -m nethvoice-proxy[0-9]+ podman exec rtpengine rtpengine-ctl(?: .*)?$'
     validator: rtpengine_read
 
 allow:
+  # Explicit operator authorization includes follow, maintenance, cursor writes
+  # and future flags. Shell composition and DENY precedence still apply.
+  - '^journalctl(?: .*)?$'
   # Basic host identity and capacity checks; optional arguments remain explicit.
   - '^uname(?: -a)?$'
   - '^uptime$'

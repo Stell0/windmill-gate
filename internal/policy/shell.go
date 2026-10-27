@@ -141,12 +141,13 @@ func shellExpansionAt(input string, index int) bool {
 
 func commandViews(command string) ([]commandView, error) {
 	texts := []string{command}
+	inner := command
 	if match := runagentView.FindStringSubmatchIndex(command); match != nil {
-		inner := command[match[2]:match[3]]
+		inner = command[match[2]:match[3]]
 		texts = append(texts, inner)
-		if nested := podmanExecView.FindStringSubmatchIndex(inner); nested != nil {
-			texts = append(texts, inner[nested[2]:nested[3]])
-		}
+	}
+	if nested := podmanExecView.FindStringSubmatchIndex(inner); nested != nil {
+		texts = append(texts, inner[nested[2]:nested[3]])
 	}
 	views := make([]commandView, 0, len(texts))
 	var parseErr error
@@ -161,6 +162,12 @@ func commandViews(command string) ([]commandView, error) {
 		if parseErr == nil && err != nil {
 			parseErr = err
 		}
+	}
+	// Reject leftover wrappers before any rule can match an intermediate view.
+	leaf := views[len(views)-1].words
+	if len(leaf) > 0 && (leaf[0].value == "runagent" ||
+		len(leaf) > 1 && leaf[0].value == "podman" && leaf[1].value == "exec") {
+		parseErr = errors.New("unsupported or nested execution wrapper")
 	}
 	return views, parseErr
 }

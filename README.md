@@ -11,8 +11,9 @@ the operator about unmatched commands, and records every decision.
 
 Gate uses your existing Bastion, Sancho, and Windmill connection. It does not
 give the agent transport credentials or an unrestricted remote shell. The
-bundled policy permits environment and module-action reads that can return
-production credentials; see the policy reference below.
+bundled policy permits file, journal, environment, container startup-argument and
+module-action reads that can return production credentials; see the policy
+reference below.
 
 ## Quick start
 
@@ -266,17 +267,33 @@ agents must still follow applicable sensitive-data handling instructions.
 accepts only `--help` or `--version`, with an optional `/usr/local/bin/` path.
 Other arguments, shell composition and unmatched commands retain approval checks.
 
-Journal reads scoped to one UID, syslog tag or user unit support optional UTC time
-bounds, 1–1000 lines and mandatory `--no-pager`. Filters accept bounded IDs, task
-selectors, simple diagnostic alternatives and three fixed service-error
-expressions; general regular expressions still require approval.
-Container inspection additionally permits a fixed runtime-state projection for
-up to 8 named containers, including through the existing strict `runagent`
-wrapper. Raw inspection and environment projections still require approval.
+The operator-approved file-read policy allows `cat`, non-following `tail`, `grep`
+and `egrep` over any explicit clean file path, including credential files.
+Print-only `sed -n START,ENDp FILE` accepts any ascending positive numeric range
+from any such file, without a line-count cap. Stdin-only reads, path traversal,
+shell expansions, executable sed programs and file writes still require approval.
+Gate does not redact file contents.
+
+Every standalone `journalctl` invocation is allowed, with any arguments. This
+explicit operator authorization includes follow mode, journal deletion/rotation,
+cursor-file writes, image mounting and future options. Shell composition still
+requires approval and DENY rules retain precedence. Gate still limits returned
+output; agents should use bounded, non-following reads for normal diagnostics.
+Gate executes without a production PTY; use `--no-pager` explicitly for clarity.
+
+Container inspection permits the entrypoint and argument fields
+`.Config.Entrypoint`, `.Config.Cmd`, `.Path` and `.Args`, with optional `json`
+formatting, for up to 8 named containers. These arguments can contain credentials.
+The existing fixed runtime-state projection remains allowed. Raw inspection,
+environment projections and arbitrary Go templates still require approval.
+These reads inherit through one strict `runagent` and/or `podman exec` wrapper;
+nested execution wrappers require approval.
 
 User-service diagnostics allow `show` for up to eight explicit units, `cat` for
-one unit, and `list-jobs`, with `--no-pager`. The fixed Podman container-status
-format accepts either single or double quotes. Host checks include `df -h /home`,
+one unit, and `list-jobs`, with `--no-pager`. `podman ps -a --format FORMAT`
+accepts any single- or double-quoted template, including through `runagent`.
+Additional flags and shell expansions still require approval.
+Host checks include `df -h /home`,
 `hostname`, `nproc`, the disk/IO pressure accounting files and the exact
 `grep PRETTY_NAME /etc/os-release` query. Performance sampling permits `iostat -xz`
 and `vmstat` (optionally `-d`) with both an interval and report count of 1–10.
@@ -292,11 +309,10 @@ These rules inherit through the existing strict wrapper views.
 
 Additional rules cover the exact ISO date and mount-source queries, module script
 checksums, environment inspection, container process lists and quoted Asterisk
-dialplan selectors. `sed -n START,ENDp FILE` accepts at most 1000
-lines from known diagnostic source/configuration or log files, with optional
-quotes around the range. Grep supports the observed Kamailio, RTPengine, Asterisk
-and application source paths. Arbitrary files, shell globs, sed programs and
-unsupported command forms still require approval.
+dialplan selectors. `sed -n START,ENDp FILE` accepts ascending positive numeric
+ranges from any explicit clean file path, with optional quotes around the range.
+Shell globs, executable sed programs and unsupported command forms still require
+approval.
 
 Live SIP captures require `timeout` of 1–180 seconds, a fixed `any` interface,
 ports 5060/5061/20030, and a `/tmp/gate-NAME.pcap` output path. Capture replay
@@ -310,9 +326,15 @@ remain `ASK`. Gate classifies and executes the original command bytes unchanged.
 For pipe-separated timestamps, use `stat -c '%n|%W|%w|%Y|%y' /home/MODULE`;
 the unquoted form is a shell pipeline and still requires approval.
 
-For NethVoice, bounded database reads run through the `mariadb` container's
-fixed credential wrapper. Direct MySQL commands in `freepbx` are not part of
-the default allow policy.
+For NethVoice, parsed database reads run through the `mariadb` container's fixed
+credential wrapper. SELECT supports table aliases, INNER/LEFT/RIGHT/CROSS joins,
+COUNT/SUM/AVG/MIN/MAX, DISTINCT, GROUP BY/HAVING, IN lists and the existing string
+functions. SHOW and DESCRIBE retain their explicit metadata forms. Unsupported
+SQL remains ASK, including subqueries, UNION, arbitrary functions, writes,
+locking, variables, comments and multiple statements. A keyword blacklist is
+insufficient: [SELECT INTO OUTFILE writes files](https://mariadb.com/docs/server/reference/sql-statements/data-manipulation/selecting-data/select-into-outfile).
+The wrapper also rejects shell expansions and quote injection inside SQL values.
+Direct MySQL commands in `freepbx` are not part of the default allow policy.
 
 Analyze audit history for possible persistent policy improvements with:
 

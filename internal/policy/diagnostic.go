@@ -22,6 +22,9 @@ var validators = map[string]func([]shellWord) bool{
 	"rtpengine_read":        validateRTPengineRead,
 	"uid_journal":           validateUIDJournal,
 	"scoped_journal":        validateScopedJournal,
+	"journal_read":          validateJournalRead,
+	"container_startup":     validateContainerStartup,
+	"container_ps":          validateContainerPS,
 }
 
 func validateAsteriskConfigSlice(words []shellWord) bool {
@@ -105,7 +108,7 @@ func validateCat(arguments []shellWord) bool {
 		"--squeeze-blank": true,
 	}
 	operands, ok := parseReadOptions(arguments, "AbEeEnstTuv", booleanLong, nil, nil)
-	return ok && logOperands(operands)
+	return ok && fileOperands(operands)
 }
 
 func validateTail(arguments []shellWord) bool {
@@ -145,12 +148,12 @@ func validateTail(arguments []shellWord) bool {
 		}
 		operands = append(operands, arguments[index])
 	}
-	return logOperands(operands)
+	return fileOperands(operands)
 }
 
 func validateGrep(arguments []shellWord) bool {
 	operands, ok := parseGrepOperands(arguments)
-	return ok && logOperands(operands)
+	return ok && fileOperands(operands)
 }
 
 func parseGrepOperands(arguments []shellWord) ([]shellWord, bool) {
@@ -373,12 +376,12 @@ func parseReadOptions(arguments []shellWord, booleanShort string, booleanLong, v
 	return operands, true
 }
 
-func logOperands(operands []shellWord) bool {
+func fileOperands(operands []shellWord) bool {
 	if len(operands) == 0 {
 		return false
 	}
 	for _, operand := range operands {
-		if !cleanPath(operand.value, true) {
+		if !cleanPath(operand.value, false) {
 			return false
 		}
 	}
