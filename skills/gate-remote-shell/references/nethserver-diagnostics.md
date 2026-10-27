@@ -106,7 +106,8 @@ runagent -m <module-id> podman logs --tail 500 --since 1h --timestamps <containe
 
 Gate validates standalone `ls` paths and recognized read-only options. For
 `cat`, `tail`, `grep`, and `egrep`, every file operand must be a clean lexical
-path under `/var/log`; stdin-only forms, traversal, globs, expansions, unknown
+path. The bundled policy permits reads outside `/var/log`, including credential
+files; only collect data needed for the incident. Stdin-only forms, traversal, globs, expansions, unknown
 options, and tail follow controls remain subject to operator review. Large
 non-following tail counts are safe because Gate still enforces its output cap.
 
@@ -116,12 +117,21 @@ bounds. If centralized logs are empty or fail, use the bounded journal fallback
 instead of switching to follow mode.
 
 For an exact module-user journal window, resolve the UID first and use either
-UTC timestamp form below. The line limit remains mandatory:
+UTC timestamp form below. Keep a line limit for useful, bounded diagnostics even
+though the bundled policy also accepts unbounded direct journal queries:
 
 ```bash
 journalctl _UID=<numeric-uid> --since=2026-09-03T06:45:00Z --until=2026-09-03T08:30:00Z --no-pager -o short-iso-precise -n 1000
 journalctl _UID=<numeric-uid> --since="2026-09-03 06:45:00 UTC" --until="2026-09-03 08:30:00 UTC" --no-pager -o short-iso-precise -n 1000
+journalctl _UID=<numeric-uid> --since "20 minutes ago" --no-pager -n 200 -o json --output-fields=MESSAGE --grep 'error|fatal|failed'
 ```
+
+Submit `journalctl` directly and process returned JSON locally. Do not wrap the
+query in remote Python to count, format or filter it. Direct reads support
+relative/local timestamps and quoted search expressions. The bundled policy now
+allows every standalone journalctl invocation, including maintenance and follow
+options; keep this investigation workflow bounded and read-only. Python wrappers
+retain approval checks.
 
 When `sqlite3` is installed, the persistent policy permits fixed audit-metadata
 queries over recent tasks, optionally narrowed to the four installation actions
@@ -204,11 +214,12 @@ runagent -m <nethvoice-module-id> podman exec mariadb sh -c 'mysql -uroot -p${MA
 
 The Asterisk CLI policy accepts only quoted commands beginning with `module
 show`, `core show`, `database show`, or `pjsip show`, plus exact `queue show`
-and `config show help` checks. The `sed` form is limited to a quoted forward
-range of at most 1,000 lines in `pjsip.endpoint.conf`; other programs and files
-remain subject to operator review. The MariaDB form above is parsed as one
-SELECT over one normal table and must retain the exact password-variable
-wrapper. Joins, unions, subqueries, variables, comments, writes,
+and `config show help` checks. Print-only ascending numeric `sed` ranges
+can read any explicit clean file path, with optional quotes around the range.
+Executable/in-place sed programs retain approval checks. The MariaDB form above
+is parsed as one SELECT with supported joins, aliases, aggregates, grouping and
+IN lists; it must retain the exact password-variable wrapper. Unions, subqueries,
+variables, comments, writes,
 output/locking clauses, unrecognized functions, alternate
 credentials/options/databases, and unsafe shell quoting require an operator
 decision. Do not look for `/usr/bin/mysql` in `freepbx`; NethVoice keeps the

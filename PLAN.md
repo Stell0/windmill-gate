@@ -102,6 +102,46 @@ implementation CI. The session's cached C0 connector exposes 63 older operations
 server-side protected-space/ingestion operations cannot be fabricated in that
 catalog. Do not claim server/SDK-only evidence proves a refreshed-harness skill pass.
 
+## Operator-approved read policy expansion (27 October 2026)
+
+The operator explicitly authorized file reads across paths, direct journal
+queries and container entrypoint/argument inspection. File reads may expose
+credentials: `cat`, non-following `tail`, `grep`/`egrep` and bounded print-only
+`sed` no longer restrict operands to log or known source files. Journal query
+options accept all scopes, JSON output, relative/local timestamps, repeated
+selectors and quoted search expressions. Journal maintenance, cursor-file writes,
+image mounting, follow mode, Python and unknown command families still ASK.
+Startup inspection accepts only the reviewed entrypoint/argument fields, with
+optional JSON formatting, rather than arbitrary Go templates or environment
+projections. This intentionally expands the earlier confidentiality boundary.
+
+Persistent rule inheritance now rejects nested execution wrappers before matching
+intermediate views, and supports one direct `podman exec` as well as the existing
+`runagent` plus container combination. Classification never rewrites command
+bytes, DENY retains precedence and target selection remains operator-controlled.
+These changes update the bundled policy; they do not deploy the operator's active
+policy or remove the human review requirement for persistent policy changes.
+
+## Explicit operator policy expansion after CTI investigation (27 October 2026)
+
+The operator authorized grep over all explicit file paths in any supported
+container wrapper, any positive ascending print-only sed range without the
+previous 1000-line cap, every standalone journalctl invocation, and arbitrary
+quoted `podman ps -a --format` templates. Journal authorization deliberately
+includes maintenance/deletion, follow mode, cursor-file writes, image mounting
+and unknown/future flags. This revises the earlier read-only journal boundary;
+normal diagnostic skills still prefer bounded reads. Shell composition, nested
+wrappers, DENY precedence, immutable execution and target control remain intact.
+
+Database reads use the existing SQL parser, expanded for aliases, joins,
+aggregates, DISTINCT, GROUP BY/HAVING and IN lists. The suggested write-keyword
+blacklist is replaced with explicit read syntax: writes, file output, locks,
+arbitrary functions, comments, multiple statements and unsupported SQL still ASK.
+The MariaDB wrapper validates shell-sensitive SQL bytes before applying the SQL
+grammar, including SQL string values and escaped outer-quote segments. Legacy
+escaped query delimiters retain only their shell-safe simple query forms.
+These repository changes do not deploy or edit the active policy.
+
 ## Design constraints
 
 The following constraints apply to every version:

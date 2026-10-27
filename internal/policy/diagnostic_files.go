@@ -7,7 +7,7 @@ import (
 )
 
 var diagnosticIdentifier = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$`)
-var printRange = regexp.MustCompile(`^([1-9][0-9]{0,8}),([1-9][0-9]{0,8})p$`)
+var printRange = regexp.MustCompile(`^([1-9][0-9]*),([1-9][0-9]*)p$`)
 
 func validateModuleChecksums(words []shellWord) bool {
 	if len(words) < 2 || len(words) > 9 || words[0].value != "sha256sum" {
@@ -42,10 +42,9 @@ func validateDiagnosticSlice(words []shellWord) bool {
 	if match == nil {
 		return false
 	}
-	start, _ := strconv.Atoi(match[1])
-	end, _ := strconv.Atoi(match[2])
-	return end >= start && end-start < 1000 && cleanPath(words[3].value, false) &&
-		(diagnosticSourcePath(words[3].value) || logOperands(words[3:]))
+	start, startErr := strconv.ParseUint(match[1], 10, 64)
+	end, endErr := strconv.ParseUint(match[2], 10, 64)
+	return startErr == nil && endErr == nil && end >= start && cleanPath(words[3].value, false)
 }
 
 // Explicit configuration/source paths keep these rules away from arbitrary

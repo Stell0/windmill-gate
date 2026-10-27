@@ -32,7 +32,7 @@ func TestApprovedNS7DiagnosticBoundaries(t *testing.T) {
 		"systemctl is-active /etc/httpd":                                    Ask,
 		"systemctl is-active ../httpd":                                      Ask,
 		"systemctl is-active 'httpd'":                                       Ask,
-		"cat /etc/nethserver-release /etc/shadow":                           Ask,
+		"cat /etc/nethserver-release /etc/shadow":                           Allow,
 		"cat /etc/nethserver-release/../shadow":                             Ask,
 		"date -Is -s 2026-01-01":                                            Ask,
 		"httpd -t -f /tmp/config":                                           Ask,

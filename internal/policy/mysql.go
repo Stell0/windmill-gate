@@ -37,7 +37,7 @@ func validateMySQLShellRead(words []shellWord) bool {
 		!cleanLiteral(words[2].value) || words[3].value != "podman" ||
 		words[4].value != "exec" || words[5].value != "mariadb" ||
 		words[6].value != "sh" || words[7].value != "-c" ||
-		words[8].quote != '\'' || words[8].mixed {
+		words[8].quote != '\'' {
 		return false
 	}
 	const prefix = `mysql -uroot -p${MARIADB_ROOT_PASSWORD} -N -B `
@@ -51,7 +51,15 @@ func validateMySQLShellRead(words []shellWord) bool {
 		return false
 	}
 	query, ok := quotedShellQuery(command)
-	return ok && validateReadOnlySQL(query)
+	if !ok || strings.ContainsAny(query, "\"\\$`") {
+		return false
+	}
+	// Older clients supplied escaped quote delimiters. Preserve their simple
+	// reads, but never admit shell operators or expansions in that unquoted form.
+	if strings.HasPrefix(command, `\"`) && strings.ContainsAny(query, "';&|<>()*?[]{}~#") {
+		return false
+	}
+	return validateReadOnlySQL(query)
 }
 
 func quotedShellQuery(value string) (string, bool) {
@@ -73,7 +81,7 @@ func validateReadOnlySQL(query string) bool {
 	if !ok {
 		return false
 	}
-	parser := sqlParser{tokens: tokens}
+	parser := sqlParser{tokens: tokens, extended: true}
 	return parser.readStatement() && parser.atEnd()
 }
 
@@ -104,6 +112,8 @@ const (
 type sqlToken struct {
 	kind  sqlTokenKind
 	value string
+	start int
+	end   int
 }
 
 func scanSQL(query string) ([]sqlToken, bool) {
@@ -120,7 +130,7 @@ func scanSQL(query string) ([]sqlToken, bool) {
 			for index < len(query) && (asciiLetter(query[index]) || asciiDigit(query[index]) || query[index] == '_') {
 				index++
 			}
-			result = append(result, sqlToken{kind: sqlIdentifier, value: query[start:index]})
+			result = append(result, sqlToken{kind: sqlIdentifier, value: query[start:index], start: start, end: index})
 			continue
 		}
 		if asciiDigit(character) {
@@ -171,7 +181,7 @@ func scanSQL(query string) ([]sqlToken, bool) {
 			result = append(result, sqlToken{kind: sqlComma, value: ","})
 			index++
 		case '(':
-			result = append(result, sqlToken{kind: sqlLeftParen, value: "("})
+			result = append(result, sqlToken{kind: sqlLeftParen, value: "(", start: index})
 			index++
 		case ')':
 			result = append(result, sqlToken{kind: sqlRightParen, value: ")"})
@@ -209,8 +219,10 @@ func scanSQL(query string) ([]sqlToken, bool) {
 }
 
 type sqlParser struct {
-	tokens []sqlToken
-	index  int
+	tokens   []sqlToken
+	index    int
+	extended bool
+	depth    int
 }
 
 func (p *sqlParser) readStatement() bool {
@@ -272,10 +284,31 @@ func (p *sqlParser) showPattern() bool {
 }
 
 func (p *sqlParser) selectStatement() bool {
-	if !p.keyword("SELECT") || !p.selectList() || !p.keyword("FROM") || !p.identifier() {
+	if !p.keyword("SELECT") {
+		return false
+	}
+	if p.extended {
+		_ = p.keyword("DISTINCT")
+	}
+	if !p.selectList() {
+		return false
+	}
+	if p.extended {
+		if p.keyword("FROM") && !p.tables() {
+			return false
+		}
+	} else if !p.keyword("FROM") || !p.identifier() {
 		return false
 	}
 	if p.keyword("WHERE") && !p.booleanExpression() {
+		return false
+	}
+	if p.extended && p.keyword("GROUP") {
+		if !p.keyword("BY") || !p.orderList() {
+			return false
+		}
+	}
+	if p.extended && p.keyword("HAVING") && !p.booleanExpression() {
 		return false
 	}
 	if p.keyword("ORDER") {
@@ -287,6 +320,55 @@ func (p *sqlParser) selectStatement() bool {
 		return false
 	}
 	return true
+}
+
+func (p *sqlParser) tableReference() bool {
+	if !p.identifier() {
+		return false
+	}
+	if p.kind(sqlDot) && !p.identifier() {
+		return false
+	}
+	if p.keyword("AS") {
+		return p.identifier()
+	}
+	if p.currentKind(sqlIdentifier) && !reservedSQLWord(p.tokens[p.index].value) {
+		return p.identifier()
+	}
+	return true
+}
+
+func (p *sqlParser) tables() bool {
+	if !p.tableReference() {
+		return false
+	}
+	for {
+		if p.kind(sqlComma) {
+			if !p.tableReference() {
+				return false
+			}
+			continue
+		}
+		cross := p.keyword("CROSS")
+		typed := cross || p.keyword("INNER")
+		if p.keyword("LEFT") || p.keyword("RIGHT") {
+			typed = true
+			_ = p.keyword("OUTER")
+		}
+		if !p.keyword("JOIN") {
+			return !typed
+		}
+		if !p.tableReference() {
+			return false
+		}
+		if p.keyword("ON") {
+			if !p.booleanExpression() {
+				return false
+			}
+		} else if !cross {
+			return false
+		}
+	}
 }
 
 func (p *sqlParser) selectList() bool {
@@ -305,7 +387,7 @@ func (p *sqlParser) selectList() bool {
 }
 
 func (p *sqlParser) selectExpression() bool {
-	if !p.scalar(false) {
+	if !p.scalar(p.extended) {
 		return false
 	}
 	if p.keyword("AS") {
@@ -327,6 +409,14 @@ func (p *sqlParser) booleanExpression() bool {
 }
 
 func (p *sqlParser) booleanTerm() bool {
+	p.depth++
+	defer func() { p.depth-- }()
+	if p.depth > 64 {
+		return false
+	}
+	if p.extended && p.keyword("NOT") {
+		return p.booleanTerm()
+	}
 	if p.kind(sqlLeftParen) {
 		return p.booleanExpression() && p.kind(sqlRightParen)
 	}
@@ -339,6 +429,21 @@ func (p *sqlParser) booleanTerm() bool {
 	if p.keyword("IS") {
 		_ = p.keyword("NOT")
 		return p.keyword("NULL")
+	}
+	if p.extended {
+		not := p.keyword("NOT")
+		if p.keyword("IN") {
+			if !p.kind(sqlLeftParen) || !p.scalar(true) {
+				return false
+			}
+			for p.kind(sqlComma) {
+				if !p.scalar(true) {
+					return false
+				}
+			}
+			return p.kind(sqlRightParen)
+		}
+		return !not
 	}
 	return false
 }
@@ -383,11 +488,34 @@ func (p *sqlParser) limit() bool {
 }
 
 func (p *sqlParser) scalar(allowLiteral bool) bool {
+	p.depth++
+	defer func() { p.depth-- }()
+	if p.depth > 64 {
+		return false
+	}
+	if allowLiteral && (p.kind(sqlString) || p.kind(sqlNumber) || p.keyword("NULL") || p.keyword("TRUE") || p.keyword("FALSE")) {
+		return true
+	}
 	if p.currentKind(sqlIdentifier) {
-		name := p.tokens[p.index].value
+		nameToken := p.tokens[p.index]
+		name := nameToken.value
 		p.index++
 		if p.kind(sqlLeftParen) {
+			// Whitespace can resolve names such as SUM to a stored function
+			// instead of the native aggregate, depending on SQL mode.
+			if nameToken.end != p.tokens[p.index-1].start {
+				return false
+			}
 			switch strings.ToUpper(name) {
+			case "COUNT", "SUM", "AVG", "MIN", "MAX":
+				if !p.extended {
+					return false
+				}
+				if strings.EqualFold(name, "COUNT") && p.kind(sqlStar) {
+					return p.kind(sqlRightParen)
+				}
+				_ = p.keyword("DISTINCT")
+				return p.booleanExpression() && p.kind(sqlRightParen)
 			case "UPPER", "LOWER":
 				return p.scalar(true) && p.kind(sqlRightParen)
 			case "REPLACE":
@@ -400,11 +528,11 @@ func (p *sqlParser) scalar(allowLiteral bool) bool {
 			return false
 		}
 		if p.kind(sqlDot) {
+			if p.extended && p.kind(sqlStar) {
+				return true
+			}
 			return p.identifier()
 		}
-		return true
-	}
-	if allowLiteral && (p.kind(sqlString) || p.kind(sqlNumber) || p.keyword("NULL") || p.keyword("TRUE") || p.keyword("FALSE")) {
 		return true
 	}
 	return false
@@ -464,6 +592,8 @@ func reservedSQLWord(value string) bool {
 		"UNION", "INTO", "OUTFILE", "DUMPFILE", "FOR", "LOCK", "PROCEDURE",
 		"SHOW", "TABLES", "COLUMNS", "FIELDS", "INDEX", "INDEXES", "KEYS",
 		"CREATE", "TABLE", "VIEW", "DESCRIBE", "IN":
+		return true
+	case "GROUP", "HAVING", "OUTER", "DISTINCT", "USING", "WITH":
 		return true
 	default:
 		return false
