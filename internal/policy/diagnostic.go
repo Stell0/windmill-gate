@@ -25,6 +25,7 @@ var validators = map[string]func([]shellWord) bool{
 	"journal_read":          validateJournalRead,
 	"container_startup":     validateContainerStartup,
 	"container_ps":          validateContainerPS,
+	"prometheus_query":      validatePrometheusQuery,
 }
 
 func validateAsteriskConfigSlice(words []shellWord) bool {

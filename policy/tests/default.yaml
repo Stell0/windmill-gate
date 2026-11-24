@@ -1,4 +1,60 @@
 allow:
+  - command: "runagent -m nethvoice7 df -h /"
+    expect: ALLOW
+  - command: "podman exec freepbx ss -lntu"
+    expect: ALLOW
+  - command: "runagent -m nethvoice7 podman exec freepbx ip -j addr show"
+    expect: ALLOW
+  - command: "df -h /"
+    expect: ALLOW
+  - command: "df -h / /home"
+    expect: ALLOW
+  - command: "df -h /home/nethvoice7/.config/state"
+    expect: ALLOW
+  - command: "df -h /home1/nethvoice55/.config/state"
+    expect: ALLOW
+  - command: "systemctl --no-pager list-units --type=service"
+    expect: ALLOW
+  - command: "runagent -m nethvoice7 systemctl --user list-units --type=service --all --no-legend --no-pager"
+    expect: ALLOW
+  - command: "runagent -m nethvoice7 systemctl --user list-timers --all --no-legend --no-pager"
+    expect: ALLOW
+  - command: "ps -u nethvoice7 -o comm,etimes,stat,pcpu"
+    expect: ALLOW
+  - command: "ps -eo comm,%cpu,%mem,rss --sort=-%cpu"
+    expect: ALLOW
+  - command: "lsblk -o NAME,TYPE,SIZE,MOUNTPOINT"
+    expect: ALLOW
+  - command: "ss -lntu"
+    expect: ALLOW
+  - command: "ip -j addr show"
+    expect: ALLOW
+  - command: "runagent -m metrics7 podman port prometheus"
+    expect: ALLOW
+  - command: "runagent -m metrics7 podman exec prometheus promtool --version"
+    expect: ALLOW
+  - command: "runagent -m metrics7 podman exec prometheus promtool query instant http://127.0.0.1:9090 'count by (job) (up)'"
+    expect: ALLOW
+  - command: "runagent -m metrics7 podman exec prometheus promtool query instant http://127.0.0.1:9091 'count by (job) (up)'"
+    expect: ALLOW
+  - command: "runagent -m metrics7 podman exec prometheus promtool query instant http://127.0.0.1:9091 'count by (__name__) ({__name__=~\".*(cpu|load|disk_io|mysql|maria|cdr|cti|mem_avail).*\"})'"
+    expect: ALLOW
+  - command: "runagent -m metrics7 podman exec prometheus promtool query instant http://127.0.0.1:9091 'topk(4,rate(ns8_container_cpu_seconds_total[3m] @ 1767264000))'"
+    expect: ALLOW
+  - command: "runagent -m metrics7 podman exec prometheus promtool query range --start=2026-01-01T10:36:00Z --end=2026-01-01T11:44:00Z --step=60s http://127.0.0.1:9091 'sum by (container) (rate(ns8_container_cpu_seconds_total{container=~\"mariadb|nethcti-server|nethcti-middleware\"}[3m]))'"
+    expect: ALLOW
+  - command: "runagent -m metrics7 podman exec prometheus promtool query range --start=2026-01-01T10:36:00Z --end=2026-01-01T11:44:00Z --step=60s http://127.0.0.1:9091 'label_replace(100 * (1 - avg(rate(node_cpu_seconds_total{mode=\"idle\"}[3m]))),\"measure\",\"cpu_busy_pct\",\"\",\"\") or label_replace(100 * avg(rate(node_cpu_seconds_total{mode=\"iowait\"}[3m])),\"measure\",\"cpu_iowait_pct\",\"\",\"\") or label_replace(min(node_memory_MemAvailable_bytes)/1073741824,\"measure\",\"available_gib\",\"\",\"\")'"
+    expect: ALLOW
+  - command: "runagent -m metrics7 podman exec prometheus promtool query range --start=2026-01-01T10:36:00Z --end=2026-01-01T11:44:00Z --step=60s http://127.0.0.1:9091 '100 * max(rate(node_disk_io_time_seconds_total[3m]))'"
+    expect: ALLOW
+  - command: "runagent -m metrics7 podman exec prometheus promtool query instant http://127.0.0.1:9091 'count by (__name__) ({__name__=~\"ns8_container_.*|node_disk_.*_total\"})'"
+    expect: ALLOW
+  - command: "runagent -m metrics7 podman exec prometheus promtool query instant http://127.0.0.1:9091 'topk(10,rate(ns8_container_blkio_bytes_total[3m] @ 1767264000))'"
+    expect: ALLOW
+  - command: "runagent -m metrics7 podman exec prometheus promtool query range --start=2026-01-01T10:36:00Z --end=2026-01-01T11:44:00Z --step=60s http://127.0.0.1:9091 'label_replace(max(rate(ns8_container_blkio_bytes_total{container=\"mariadb\",device=\"sda\",op=\"read\"}[3m]))/1048576,\"measure\",\"db_read_mib\",\"\",\"\") or label_replace(max(rate(node_disk_read_bytes_total{device=\"sda\"}[3m]))/1048576,\"measure\",\"disk_read_mib\",\"\",\"\") or label_replace(100*max(rate(node_disk_io_time_seconds_total{device=\"sda\"}[3m])),\"measure\",\"disk_busy_pct\",\"\",\"\")'"
+    expect: ALLOW
+  - command: "runagent -m metrics7 podman exec prometheus promtool query range --start=2026-01-01T00:00:00Z --end=2026-01-01T06:00:00Z --step=30s http://127.0.0.1:9091 '100 * max(rate(node_disk_io_time_seconds_total[3m]))'"
+    expect: ALLOW
   - command: "cat /etc/nethserver-release"
     expect: ALLOW
   - command: "date -Is"
@@ -584,6 +640,116 @@ allow:
     expect: ALLOW
 
 ask:
+  - command: "df -h / /tmp"
+    expect: ASK
+  - command: "df -h /home/nethvoice7/.config/state/.."
+    expect: ASK
+  - command: "df -h /home/nethvoice*/.config/state"
+    expect: ASK
+  - command: "df -h /home/nethvoice7/.config/state /tmp"
+    expect: ASK
+  - command: "df -h /; id"
+    expect: ASK
+  - command: "systemctl --no-pager list-units --type=service --host=example.org"
+    expect: ASK
+  - command: "systemctl --no-pager list-units --type=service | cat"
+    expect: ASK
+  - command: "runagent -m nethvoice7 systemctl --user list-timers --all --no-legend --no-pager --machine=example.org"
+    expect: ASK
+  - command: "runagent -m nethvoice7 systemctl --user daemon-reload"
+    expect: ASK
+  - command: "runagent -m nethvoice7 runagent -m nethvoice8 systemctl --user list-timers --all --no-legend --no-pager"
+    expect: ASK
+  - command: "ps -u root -o comm,etimes,stat,pcpu"
+    expect: ASK
+  - command: "ps -u nethvoice7 -o comm,args"
+    expect: ASK
+  - command: "ps -eo comm,%cpu,%mem,rss,args --sort=-%cpu"
+    expect: ASK
+  - command: "lsblk -o NAME,TYPE,SIZE,MOUNTPOINT,SERIAL"
+    expect: ASK
+  - command: "lsblk -o NAME,TYPE,SIZE,MOUNTPOINT --sysroot /tmp"
+    expect: ASK
+  - command: "ss -lntu -p"
+    expect: ASK
+  - command: "ss -lntu -K"
+    expect: ASK
+  - command: "ip -j addr show dev eth0"
+    expect: ASK
+  - command: "ip -j addr flush dev eth0"
+    expect: ASK
+  - command: "runagent -m nethvoice7 podman exec prometheus promtool query instant http://127.0.0.1:9091 'count by (job) (up)'"
+    expect: ASK
+  - command: "runagent -m metrics1234567890 podman exec prometheus promtool query instant http://127.0.0.1:9091 'count by (job) (up)'"
+    expect: ASK
+  - command: "runagent -m metrics7 podman exec other promtool query instant http://127.0.0.1:9091 'count by (job) (up)'"
+    expect: ASK
+  - command: "runagent -m metrics7 podman exec -i prometheus promtool query instant http://127.0.0.1:9091 'count by (job) (up)'"
+    expect: ASK
+  - command: "podman exec prometheus promtool query instant http://127.0.0.1:9091 'count by (job) (up)'"
+    expect: ASK
+  - command: "promtool query instant http://127.0.0.1:9091 'count by (job) (up)'"
+    expect: ASK
+  - command: "runagent -m metrics7 runagent -m metrics7 podman exec prometheus promtool query instant http://127.0.0.1:9091 'count by (job) (up)'"
+    expect: ASK
+  - command: "runagent -m metrics7 podman exec prometheus promtool query instant http://192.0.2.1:9091 'count by (job) (up)'"
+    expect: ASK
+  - command: "runagent -m metrics7 podman exec prometheus promtool query instant http://127.0.0.1:9092 'count by (job) (up)'"
+    expect: ASK
+  - command: "runagent -m metrics7 podman exec prometheus promtool query instant http://127.0.0.1:9091/path 'count by (job) (up)'"
+    expect: ASK
+  - command: "runagent -m metrics7 podman exec prometheus promtool query instant http://127.0.0.1:9091/../ 'count by (job) (up)'"
+    expect: ASK
+  - command: "runagent -m metrics7 podman exec prometheus promtool query instant http://user@127.0.0.1:9091 'count by (job) (up)'"
+    expect: ASK
+  - command: "runagent -m metrics7 podman exec prometheus promtool query instant --header=Authorization:test http://127.0.0.1:9091 'count by (job) (up)'"
+    expect: ASK
+  - command: "runagent -m metrics7 podman exec prometheus promtool query --http.config.file=/tmp/prom.yml instant http://127.0.0.1:9091 'count by (job) (up)'"
+    expect: ASK
+  - command: "runagent -m metrics7 podman exec prometheus promtool query labels http://127.0.0.1:9091 'count by (job) (up)'"
+    expect: ASK
+  - command: "runagent -m metrics7 podman exec prometheus promtool push metrics http://127.0.0.1:9091 'count by (job) (up)'"
+    expect: ASK
+  - command: "runagent -m metrics7 podman exec prometheus promtool query instant http://127.0.0.1:9091 'count by (job) (up)' | cat"
+    expect: ASK
+  - command: "runagent -m metrics7 podman exec prometheus promtool query instant http://127.0.0.1:9091 'count by (job) (up)'; id"
+    expect: ASK
+  - command: "runagent -m metrics7 podman exec prometheus promtool query instant http://127.0.0.1:9091 'count by (job) (up)' extra"
+    expect: ASK
+  - command: "runagent -m metrics7 podman exec prometheus promtool query instant http://127.0.0.1:9091 \"$(id)\""
+    expect: ASK
+  - command: "runagent -m metrics7 podman exec prometheus promtool query instant http://127.0.0.1:9091 'count by (job) (up)'\"\""
+    expect: ASK
+  - command: "runagent -m metrics7 podman exec prometheus promtool query instant http://127.0.0.1:9091 'count by (__name__) ({__name__=~\".+\"})'"
+    expect: ASK
+  - command: "runagent -m metrics7 podman exec prometheus promtool query instant http://127.0.0.1:9091 'topk(11,rate(ns8_container_blkio_bytes_total[3m]))'"
+    expect: ASK
+  - command: "runagent -m metrics7 podman exec prometheus promtool query instant http://127.0.0.1:9091 'topk(4,rate(ns8_container_blkio_bytes_total[16m]))'"
+    expect: ASK
+  - command: "runagent -m metrics7 podman exec prometheus promtool query instant http://127.0.0.1:9091 'topk(4,rate(ns8_container_blkio_bytes_total[3m:1s]))'"
+    expect: ASK
+  - command: "runagent -m metrics7 podman exec prometheus promtool query range --start=2026-01-01T00:00:00Z --end=2026-01-01T06:00:01Z --step=30s http://127.0.0.1:9091 '100 * max(rate(node_disk_io_time_seconds_total[3m]))'"
+    expect: ASK
+  - command: "runagent -m metrics7 podman exec prometheus promtool query range --start=2026-01-01T06:00:00Z --end=2026-01-01T00:00:00Z --step=60s http://127.0.0.1:9091 '100 * max(rate(node_disk_io_time_seconds_total[3m]))'"
+    expect: ASK
+  - command: "runagent -m metrics7 podman exec prometheus promtool query range --start=2026-01-01T00:00:00Z --end=2026-01-01T00:00:00Z --step=60s http://127.0.0.1:9091 '100 * max(rate(node_disk_io_time_seconds_total[3m]))'"
+    expect: ASK
+  - command: "runagent -m metrics7 podman exec prometheus promtool query range --start=2026-02-30T00:00:00Z --end=2026-03-02T01:00:00Z --step=60s http://127.0.0.1:9091 '100 * max(rate(node_disk_io_time_seconds_total[3m]))'"
+    expect: ASK
+  - command: "runagent -m metrics7 podman exec prometheus promtool query range --start=2026-01-01T00:00:00Z --end=2026-01-01T06:00:00Z --step=29s http://127.0.0.1:9091 '100 * max(rate(node_disk_io_time_seconds_total[3m]))'"
+    expect: ASK
+  - command: "runagent -m metrics7 podman exec prometheus promtool query range --start=2026-01-01T00:00:00Z --end=2026-01-01T06:00:00Z --step=0s http://127.0.0.1:9091 '100 * max(rate(node_disk_io_time_seconds_total[3m]))'"
+    expect: ASK
+  - command: "runagent -m metrics7 podman exec prometheus promtool query range --start=2026-01-01T00:00:00Z --end=2026-01-01T06:00:00Z --step=1000s http://127.0.0.1:9091 '100 * max(rate(node_disk_io_time_seconds_total[3m]))'"
+    expect: ASK
+  - command: "runagent -m metrics7 podman exec prometheus promtool query range --start=2026-01-01T00:00:00Z --end=2026-01-01T06:00:00Z --step=30s http://127.0.0.1:9091 'count by (job) (up)'"
+    expect: ASK
+  - command: "runagent -m metrics7 podman exec prometheus promtool query range --start=2026-01-01T00:00:00Z --end=2026-01-01T06:00:00Z --step=30s http://127.0.0.1:9091 'label_replace(min(node_memory_MemAvailable_bytes)/1073741824,\"measure\",\"memory\",\"\",\"\") or label_replace(min(node_memory_MemAvailable_bytes)/1073741824,\"measure\",\"memory\",\"\",\"\") or label_replace(min(node_memory_MemAvailable_bytes)/1073741824,\"measure\",\"memory\",\"\",\"\") or label_replace(min(node_memory_MemAvailable_bytes)/1073741824,\"measure\",\"memory\",\"\",\"\")'"
+    expect: ASK
+  - command: "runagent -m metrics7 podman port prometheus 9091"
+    expect: ASK
+  - command: "runagent -m metrics7 podman exec prometheus promtool --version extra"
+    expect: ASK
   - command: "python3 -c 'print(1)'"
     expect: ASK
   - command: "runagent -m module1 runagent -m module2 podman exec web1 cat /entrypoint"
