@@ -282,3 +282,26 @@ func TestValidatedAllowRejectsUnknownValidator(t *testing.T) {
 		t.Fatal("unknown validator was accepted")
 	}
 }
+
+func TestValidatedPrometheusQueryWithBroadPattern(t *testing.T) {
+	engine, err := New(Config{ValidatedAllow: []ValidatedRule{{
+		Regexp: ".*", Validator: "prometheus_query",
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const query = " promtool query instant http://127.0.0.1:9091 'count by (job) (up)'"
+	tests := map[string]Decision{
+		"id": Ask,
+		"runagent -m metrics1 podman exec prometheus" + query:                                                           Allow,
+		"runagent -m nethvoice1 podman exec prometheus" + query:                                                         Ask,
+		"podman exec prometheus" + query:                                                                                Ask,
+		"runagent -m metrics1 podman exec prometheus promtool query labels http://127.0.0.1:9091 'count by (job) (up)'": Ask,
+	}
+	for command, want := range tests {
+		if got := engine.Evaluate("gt_test", command).Decision; got != want {
+			t.Errorf("Evaluate(%q) = %s, want %s", command, got, want)
+		}
+	}
+}

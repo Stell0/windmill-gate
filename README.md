@@ -300,6 +300,25 @@ and `vmstat` (optionally `-d`) with both an interval and report count of 1–10.
 Process inspection uses fixed diagnostic column lists and at most 16 explicit
 PIDs. These rules also inherit through the existing strict wrapper views.
 
+The bundled policy also permits fixed disk-space checks for the root and
+home filesystems and one explicit NethVoice module state directory. Service
+inventory includes the host service list and module-scoped user service and
+timer listings with fixed options. Additional inventory commands use fixed
+process columns, block-device columns, listening TCP/UDP sockets, and JSON IP
+addresses. Standalone inventory rules inherit through the existing strict
+module and container wrappers.
+
+For installed NS8 Metrics modules, Gate allows port discovery, `promtool
+--version`, and selected read-only Prometheus queries through `runagent -m
+metricsN podman exec prometheus`. Queries target HTTP loopback on port 9090
+or 9091 and use single-quoted expressions. Use the trusted Metrics listener
+confirmed in the container startup arguments. Promtool can follow redirects. The reviewed patterns cover metric
+discovery, container CPU and block I/O, disk activity, and host CPU, I/O wait,
+and available memory. Historical ranges require explicit UTC start and end
+times, a window of at most six hours, and a step of 30–999 seconds. Rate
+lookbacks use 1–15 whole minutes. Other expressions, destinations and options
+retain approval checks.
+
 NethServer 7 diagnostics additionally allow the exact `cat /etc/nethserver-release`,
 `date -Is` and `httpd -t` commands. `systemctl is-active` accepts 1–8 explicit
 unit names, each 1–128 characters and starting with an alphanumeric character;
